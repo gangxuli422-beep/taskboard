@@ -2445,6 +2445,8 @@ function loadAll(){
   syncColumnsToPerson();
   // 自动补生成缺失的排班组（页面加载时静默执行）
   schedAutoGenerate();
+  // 过期自动切换：选日期 ≥ 今天的最早一组，全过期则生成下一周
+  schedAutoSelectCurrent();
 }
 // 自动检查并生成缺失的排班组（静默，无弹窗）
 function schedAutoGenerate(){
@@ -2487,6 +2489,25 @@ function schedAutoGenerate(){
     if(thisWeekGroupIdx>=0)SCHED_DATA.active=thisWeekGroupIdx;
     else SCHED_DATA.active=SCHED_DATA.groups.length-1;
     saveSchedData();
+  }
+  // 注意：过期自动切换逻辑已移至 loadAll() 末尾单独调用
+  // 因为 schedAutoGenerate 可能在 thisMonday<baseDate 时提前 return，导致此处的调用不执行
+}
+// 自动选中"日期 ≥ 今天的最早一组"；若全部过期则自动生成下一周并切换
+function schedAutoSelectCurrent(){
+  if(!SCHED_DATA||!SCHED_DATA.groups||SCHED_DATA.groups.length===0)return;
+  var today=new Date();today.setHours(0,0,0,0);
+  // 解析所有组日期并排序（升序），找第一个日期 ≥ 今天的
+  var idxList=SCHED_DATA.groups.map(function(g,i){return{idx:i,date:schedGroupFromDate(g.title)}})
+    .filter(function(x){return x.date}) // 排除无法解析日期的组
+    .sort(function(a,b){return a.date-b.date});
+  var target=idxList.find(function(x){return x.date.getTime()>=today.getTime()});
+  if(target){
+    SCHED_DATA.active=target.idx;
+    saveSchedData();
+  }else{
+    // 全部过期：生成下一周并切换
+    schedGenerateNext();
   }
 }
 function saveTasks(){localStorage.setItem(K_TASKS,JSON.stringify(TASKS));scheduleSyncPush()}
@@ -4479,6 +4500,19 @@ function buildSchedMsgContent(){
 }
 async function sendSchedWebhook(manual){
   var webhook=SCHED_NOTIFY.webhook;
+  // 手动推送时优先读输入框当前值（用户可能填了但没点保存）
+  if(manual){
+    var wbInp=document.getElementById("schedNotifyWebhook");
+    if(wbInp){
+      var wbVal=wbInp.value.trim();
+      if(wbVal){
+        webhook=wbVal;
+        // 顺手保存到配置
+        SCHED_NOTIFY.webhook=wbVal;
+        saveSchedNotify();
+      }
+    }
+  }
   if(!webhook){
     toast("请先填写 Webhook 地址");
     return;
@@ -5106,7 +5140,7 @@ function renderSched2NotifyHTML(type){
     '</div>';
 }
 function saveSched2Proxy(type){
-  var inp=document.getElementById("sched2Proxy");
+  var inp=document.getElementById("sched2ProxyUrl");
   if(!inp)return;
   WEBHOOK_PROXY_URL=inp.value.trim();
   saveProxyUrl();
@@ -5591,6 +5625,19 @@ function buildSchedServiceMsg(){
 async function sendSched2Webhook(type,manual){
   var conf=sched2Conf(type);
   var webhook=conf.notify.webhook;
+  // 手动推送时优先读输入框当前值（用户可能填了但没点保存）
+  if(manual){
+    var wbInp=document.getElementById("sched2Webhook");
+    if(wbInp){
+      var wbVal=wbInp.value.trim();
+      if(wbVal){
+        webhook=wbVal;
+        // 顺手保存到配置，避免下次又要手动填
+        conf.notify.webhook=wbVal;
+        conf.saveNotify();
+      }
+    }
+  }
   if(!webhook){toast("请先填写 Webhook 地址");return;}
   if(!webhook.startsWith("https://qyapi.weixin.qq.com/")&&!webhook.startsWith("http")){toast("Webhook 地址格式不对");return;}
   var content=conf.buildMsg();
