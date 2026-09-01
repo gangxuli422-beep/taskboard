@@ -53,7 +53,7 @@
   .doodles span{position:absolute;font-size:22px;opacity:.16;animation:floaty 9s ease-in-out infinite}
   @keyframes floaty{0%,100%{transform:translateY(0) rotate(-6deg)}50%{transform:translateY(-22px) rotate(8deg)}}
 
-  .header{position:sticky;top:0;z-index:100;padding:10px max(0px,calc((100% - 1400px)/2));background:rgba(255,253,249,.88);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid rgba(44,42,62,.07);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+  .header{position:sticky;top:0;z-index:100;padding:10px max(0px,calc((100% - 1400px)/2));background:rgba(255,253,249,.92);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid rgba(44,42,62,.07);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;will-change:transform}
   .brand{display:flex;align-items:center;gap:10px}
   .brand-logo{width:38px;height:38px;border-radius:12px;background:linear-gradient(135deg,#ff8a5c,#ff5f6d 60%,#ffc371);display:flex;align-items:center;justify-content:center;font-size:19px;box-shadow:0 8px 20px rgba(255,95,109,.35);flex-shrink:0}
   .brand-text .zh{font-size:17px;font-weight:800;letter-spacing:1px}
@@ -813,6 +813,8 @@
     .quote-card{min-width:160px}
     .stat-chip{padding:7px 10px}
     .stat-chip .n{font-size:14px}
+    /* 汇总标题 sticky 偏移适配手机 header 高度 */
+    .board.summary-mode > div:first-child{top:44px!important}
     /* ===== 手机竖屏排版优化 ===== */
     .stats-bar{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;width:100%}
     .stat-chip{justify-content:center;text-align:center}
@@ -895,10 +897,10 @@
   @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 
   /* ===== 人员侧边栏（树形组织架构） ===== */
-  .ps-sidebar{position:fixed;left:0;top:0;bottom:0;width:220px;background:rgba(255,253,249,.97);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-right:1.5px solid rgba(44,42,62,.08);z-index:90;display:flex;flex-direction:column;padding:10px 0 6px;gap:0;box-shadow:2px 0 18px rgba(76,62,120,.06);transition:transform .25s ease}
+  .ps-sidebar{position:fixed;left:0;top:0;bottom:0;height:100vh;height:100dvh;width:220px;background:rgba(255,253,249,.97);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-right:1.5px solid rgba(44,42,62,.08);z-index:90;display:flex;flex-direction:column;padding:10px 0 6px;gap:0;box-shadow:2px 0 18px rgba(76,62,120,.06);transition:transform .25s ease;overflow:hidden}
   .ps-sidebar .ps-side-logo{font-size:15px;font-weight:800;color:var(--ink);padding:4px 14px 8px;display:flex;align-items:center;gap:6px}
   .ps-sidebar .ps-side-logo span{font-size:18px}
-  .ps-sidebar .ps-side-items{display:flex;flex-direction:column;width:100%;padding:0 4px;flex:1;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#ccc transparent}
+  .ps-sidebar .ps-side-items{display:flex;flex-direction:column;width:100%;padding:0 4px;flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;scrollbar-width:thin;scrollbar-color:#ccc transparent;overscroll-behavior:contain}
   .ps-sidebar .ps-side-items::-webkit-scrollbar{width:4px}
   .ps-sidebar .ps-side-items::-webkit-scrollbar-thumb{background:#ddd;border-radius:2px}
   /* 待办清单折叠标题 */
@@ -957,8 +959,11 @@
   body.with-sidebar{padding-left:220px}
   /* 手机端：侧边栏改为抽屉式 */
   .ps-sidebar-toggle{display:none;position:fixed;left:8px;top:8px;z-index:120;width:36px;height:36px;border-radius:10px;border:1.5px solid #ece6dc;background:var(--card);font-size:18px;cursor:pointer;align-items:center;justify-content:center}
+  /* 抽屉遮罩层 */
+  .ps-sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:94;opacity:0;transition:opacity .25s ease;-webkit-tap-highlight-color:transparent}
+  .ps-sidebar-overlay.show{display:block;opacity:1}
   @media(max-width:768px){
-    .ps-sidebar{transform:translateX(-100%);width:240px;z-index:95}
+    .ps-sidebar{transform:translateX(-100%);width:240px;z-index:96;height:100vh;height:100dvh}
     .ps-sidebar.open{transform:translateX(0)}
     .ps-sidebar-toggle{display:flex}
     body.with-sidebar{padding-left:0}
@@ -1136,6 +1141,8 @@
 
 <!-- 手机端侧边栏开关 -->
 <button class="ps-sidebar-toggle" onclick="toggleSidebar()">☰</button>
+<!-- 抽屉遮罩层（点击关闭侧边栏） -->
+<div class="ps-sidebar-overlay" id="psSidebarOverlay" onclick="closeSidebar()"></div>
 
 <!-- 人员侧边栏（待办清单 + 小组架构） -->
 <div class="ps-sidebar" id="psSidebar">
@@ -2698,7 +2705,15 @@ function treeCountPersons(nodes){
 }
 function toggleSidebar(){
   const sb=document.getElementById("psSidebar");
-  sb.classList.toggle("open");
+  const overlay=document.getElementById("psSidebarOverlay");
+  const isOpen=sb.classList.contains("open");
+  if(isOpen){closeSidebar()}else{sb.classList.add("open");if(overlay)overlay.classList.add("show")}
+}
+function closeSidebar(){
+  const sb=document.getElementById("psSidebar");
+  const overlay=document.getElementById("psSidebarOverlay");
+  if(sb)sb.classList.remove("open");
+  if(overlay)overlay.classList.remove("show");
 }
 
 /* ============ ACCOUNT HELPERS ============ */
@@ -3161,7 +3176,7 @@ function psSelectPerson(id){
   if(headerNewBtn) headerNewBtn.style.display="";
   if(headerMoodChip) headerMoodChip.style.display="";
   // 手机端关闭侧边栏
-  if(window.innerWidth<=768){document.getElementById("psSidebar").classList.remove("open")}
+  if(window.innerWidth<=768){closeSidebar()}
   renderSidebar();
   renderBoard();
   renderTodo();
@@ -3639,7 +3654,7 @@ function renderSummary(){
   board.innerHTML="";
   // 汇总标题
   const titleBar=document.createElement("div");
-  titleBar.style.cssText="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:18px";
+  titleBar.style.cssText="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:18px;position:sticky;top:52px;z-index:90;background:var(--bg);padding:10px 0;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)";
   titleBar.innerHTML=
     '<div style="display:flex;align-items:center;gap:12px"><div style="width:46px;height:46px;border-radius:14px;background:linear-gradient(135deg,#ff8a5c,#ff5f6d);display:flex;align-items:center;justify-content:center;font-size:24px;box-shadow:0 6px 16px rgba(255,95,109,.25)">📊</div>'+
     '<div><div style="font-size:22px;font-weight:800;color:var(--ink)">团队汇总大屏</div>'+
@@ -3849,12 +3864,11 @@ function renderSchedView(){
   page.className="sched-view-page";
   // 标题栏
   const titleBar=document.createElement("div");
-  titleBar.style.cssText="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:18px";
+  titleBar.style.cssText="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:18px;position:sticky;top:52px;z-index:90;background:var(--bg);padding:10px 0;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)";
   titleBar.innerHTML=
-    '<div style="display:flex;align-items:center;gap:12px"><div style="width:46px;height:46px;border-radius:14px;background:linear-gradient(135deg,#14b8a6,#0ea5e9);display:flex;align-items:center;justify-content:center;font-size:24px;box-shadow:0 6px 16px rgba(20,184,166,.25)">🧹</div>'+
-    '<div><div style="font-size:22px;font-weight:800;color:var(--ink)">卫生值日排班表</div>'+
-    '<div style="font-size:12.5px;color:var(--ink-faint);margin-top:2px">点击单元格编辑 · 可增删行列 · 支持多组排班切换</div></div></div>'+
-    '<div style="font-size:12px;color:var(--ink-faint)">'+todayStr()+' 更新</div>';
+    '<div style="display:flex;align-items:center;gap:12px"><div style="width:46px;height:46px;border-radius:14px;background:linear-gradient(135deg,#6366f1,#818cf8);display:flex;align-items:center;justify-content:center;font-size:24px;box-shadow:0 6px 16px rgba(99,102,241,.25)">📋</div>'+
+    '<div><div style="font-size:22px;font-weight:800;color:var(--ink)">问题知识库</div>'+
+    '<div style="font-size:12.5px;color:var(--ink-faint);margin-top:2px">共 '+KBANK.length+' 条 · 分类管理</div></div></div>';
   page.appendChild(titleBar);
   // ① 值日表格卡片
   const tableCard=document.createElement("div");
@@ -4727,9 +4741,7 @@ function renderSched2Page(type){
   page.className="sched2-view-page";
   // 标题栏
   const titleBar=document.createElement("div");
-  titleBar.style.cssText="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:18px";
-  titleBar.innerHTML=
-    '<div style="display:flex;align-items:center;gap:12px"><div style="width:46px;height:46px;border-radius:14px;background:'+conf.bg+';display:flex;align-items:center;justify-content:center;font-size:24px;box-shadow:0 6px 16px rgba(20,184,166,.25)">'+conf.icon+'</div>'+
+  titleBar.style.cssText="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:18px;position:sticky;top:52px;z-index:90;background:var(--bg);padding:10px 0;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)";
     '<div><div style="font-size:22px;font-weight:800;color:var(--ink)">'+conf.title+'</div>'+
     '<div style="font-size:12.5px;color:var(--ink-faint);margin-top:2px">'+conf.sub+' · 点击班次格子安排人员</div></div></div>'+
     '<div style="font-size:12px;color:var(--ink-faint)">'+todayStr()+' 更新</div>';
