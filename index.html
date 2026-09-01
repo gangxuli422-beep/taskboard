@@ -3958,7 +3958,7 @@ function renderSchedView(){
   }
   notifyCard.innerHTML=
     '<div class="sched-notify-title">📨 企业微信定时推送 '+statusBadge+'</div>'+
-    '<div class="sched-notify-row"><span class="sched-notify-label">Webhook 地址</span><input type="text" class="sched-notify-input" id="schedNotifyWebhook" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx" value="'+esc(n.webhook||'')+'" style="flex:1;min-width:280px" oninput="autoSaveSchedNotifyWebhook()" /></div>'+
+    '<div class="sched-notify-row"><span class="sched-notify-label">Webhook 地址</span><input type="text" class="sched-notify-input" id="schedNotifyWebhook" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx" value="'+esc(n.webhook||'')+'" style="flex:1;min-width:280px" oninput="autoSaveSchedNotifyWebhook()" onchange="autoSaveSchedNotifyWebhook()" onblur="autoSaveSchedNotifyWebhook()" /></div>'+
     '<div class="sched-notify-row"><span class="sched-notify-label">推送模式</span><select class="sched-notify-select" id="schedNotifyMode" onchange="toggleSchedNotifyMode()"><option value="weekly"'+(n.mode==="weekly"?' selected':'')+'>按每周</option><option value="monthly"'+(n.mode==="monthly"?' selected':'')+'>按每月</option></select></div>'+
     '<div id="schedNotifyModeRow">'+modeRowHtml+'</div>'+
     '<div class="sched-notify-row"><span class="sched-notify-label">启用推送</span><label class="notify-switch"><input type="checkbox" id="schedNotifyEnabled" '+(n.enabled?'checked':'')+' onchange="updateSchedNotifyStatus()" /><span class="notify-switch-slider"></span></label><span class="sched-notify-hint">开启后到点自动推送当前组值日内容到企业微信群</span></div>'+
@@ -4434,6 +4434,7 @@ function updateSchedNotifyStatus(){
   // 不立即保存，只更新 UI 状态
 }
 // 值日排班 Webhook 地址输入即保存（无需再点保存设置）
+function syncSchedNotifyWebhookFromInput(){var inp=document.getElementById("schedNotifyWebhook");if(!inp)return;var v=inp.value.trim();if(v){SCHED_NOTIFY.webhook=v;saveSchedNotify();}}
 function autoSaveSchedNotifyWebhook(){
   var inp=document.getElementById("schedNotifyWebhook");
   if(!inp)return;
@@ -4506,8 +4507,10 @@ function buildSchedMsgContent(){
   return content;
 }
 async function sendSchedWebhook(manual){
+  // 推送前先从输入框同步一次地址到全局变量（防止手机端 oninput 未触发）
+  if(manual)syncSchedNotifyWebhookFromInput();
   var webhook=SCHED_NOTIFY.webhook;
-  // 手动推送时优先读输入框当前值（用户可能填了但没点保存）
+  // 手动推送时再读一次输入框当前值（双重保障）
   if(manual){
     var wbInp=document.getElementById("schedNotifyWebhook");
     if(wbInp){
@@ -4552,6 +4555,8 @@ async function sendSchedWebhook(manual){
   }
 }
 async function testSchedWebhook(){
+  // 测试前先从输入框同步一次地址到全局变量
+  syncSchedNotifyWebhookFromInput();
   var webhookInput=document.getElementById("schedNotifyWebhook");
   if(!webhookInput)return;
   var url=webhookInput.value.trim();
@@ -5125,7 +5130,7 @@ function renderSched2NotifyHTML(type){
   var status=n.enabled?'<span class="sched2-notify-status on">● 已启用</span>':'<span class="sched2-notify-status off">○ 未启用</span>';
   var dayOpts='<option value="tomorrow"'+(n.pushDay==="tomorrow"?' selected':'')+'>明天</option><option value="today"'+(n.pushDay==="today"?' selected':'')+'>今天</option>';
   return '<div class="sched2-notify-title">📨 企业微信定时推送 '+status+'</div>'+
-    '<div class="sched2-notify-row"><span class="sched2-notify-label">Webhook 地址</span><input type="text" class="sched2-notify-input" id="sched2Webhook" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx" value="'+esc(n.webhook||'')+'" style="flex:1;min-width:280px" oninput="autoSaveSched2Webhook(\''+type+'\')" /></div>'+
+    '<div class="sched2-notify-row"><span class="sched2-notify-label">Webhook 地址</span><input type="text" class="sched2-notify-input" id="sched2Webhook" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx" value="'+esc(n.webhook||'')+'" style="flex:1;min-width:280px" oninput="autoSaveSched2Webhook(\''+type+'\')" onchange="autoSaveSched2Webhook(\''+type+'\')" onblur="autoSaveSched2Webhook(\''+type+'\')" /></div>'+
     '<div class="sched2-notify-row"><span class="sched2-notify-label">推送时间</span><input type="time" class="sched2-notify-input" id="sched2PushTime" value="'+esc(n.pushTime)+'" /><span class="sched2-notify-hint">每天到点自动推送</span></div>'+
     '<div class="sched2-notify-row"><span class="sched2-notify-label">推送内容</span><select class="sched2-notify-select" id="sched2PushDay">'+dayOpts+'</select><span class="sched2-notify-hint">推送'+(n.pushDay==="tomorrow"?"明天":"当天")+'的排班</span></div>'+
     '<div class="sched2-notify-row"><span class="sched2-notify-label">启用推送</span><label class="notify-switch"><input type="checkbox" id="sched2NotifyEnabled" '+(n.enabled?'checked':'')+' /><span class="notify-switch-slider"></span></label><span class="sched2-notify-hint">开启后到点自动推送</span></div>'+
@@ -5155,6 +5160,7 @@ function saveSched2Proxy(type){
   toast("代理地址已保存"+(WEBHOOK_PROXY_URL?"":"（已清除，将自动检测）"));
 }
 // 客服/主播排班 Webhook 地址输入即保存（无需再点保存设置）
+function syncSched2WebhookFromInput(type){var inp=document.getElementById("sched2Webhook");if(!inp)return;var v=inp.value.trim();if(v){var conf=sched2Conf(type);conf.notify.webhook=v;conf.saveNotify();}}
 function autoSaveSched2Webhook(type){
   var inp=document.getElementById("sched2Webhook");
   if(!inp)return;
@@ -5638,9 +5644,11 @@ function buildSchedServiceMsg(){
   return content;
 }
 async function sendSched2Webhook(type,manual){
+  // 推送前先从输入框同步一次地址到全局变量（防止手机端 oninput 未触发）
+  if(manual)syncSched2WebhookFromInput(type);
   var conf=sched2Conf(type);
   var webhook=conf.notify.webhook;
-  // 手动推送时优先读输入框当前值（用户可能填了但没点保存）
+  // 手动推送时再读一次输入框当前值（双重保障）
   if(manual){
     var wbInp=document.getElementById("sched2Webhook");
     if(wbInp){
@@ -5673,6 +5681,8 @@ async function sendSched2Webhook(type,manual){
   }
 }
 async function testSched2Webhook(type){
+  // 测试前先从输入框同步一次地址到全局变量
+  syncSched2WebhookFromInput(type);
   var conf=sched2Conf(type);
   var wb=document.getElementById("sched2Webhook");
   var url=wb?wb.value.trim():"";
