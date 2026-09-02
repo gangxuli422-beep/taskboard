@@ -2921,9 +2921,9 @@ function init(){
   setInterval(()=>{pullCloudData(true)},60000);
   // 手机/电脑从后台切回前台时立即拉取一次，避免长时间挂后台错过云端更新
   document.addEventListener("visibilitychange",function(){
-    if(document.visibilityState==="visible"&&sbAuthed)pullCloudData(true);
+    if(document.visibilityState==="visible")pullCloudData(true);
   });
-  window.addEventListener("pageshow",function(e){if(e.persisted&&sbAuthed)pullCloudData(true)});
+  window.addEventListener("pageshow",function(e){if(e.persisted)pullCloudData(true)});
   // 启动超时检查
   restartTimeoutCheck();
   // 启动本地提醒调度器
@@ -9874,17 +9874,14 @@ function initSupabase(){
     sbClient=window.supabase.createClient(url,key,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
     sbInitialized=true;
     updateSyncBadge("on","☁️ 已连接");
-    // RLS 要求 authenticated，必须登录后才能同步
+    // 匿名模式：未登录也自动同步（RLS 已开放 anon 读写），登录则额外开启个性化标识
     sbClient.auth.getSession().then(({data})=>{
       if(data.session&&data.session.user){
         sbAuthed=true;
         showLoggedIn(data.session.user.email||"用户");
-        pullCloudData(true);
-        setupRealtime(); // 已有登录态时自动开启实时订阅
-      }else{
-        // 未登录，不拉取（RLS 下 anon 无权限）
-        updateSyncBadge("off","🔐 请登录同步");
       }
+      pullCloudData(true);
+      setupRealtime(); // 无论是否登录都开启实时订阅（秒级同步）
     });
     // 监听认证状态变化
     sbClient.auth.onAuthStateChange((event,session)=>{
@@ -9894,12 +9891,14 @@ function initSupabase(){
         pullCloudData(true);
         setupRealtime(); // 登录后订阅实时推送（秒级同步）
       }else if(event==="SIGNED_OUT"){
+        // 登出后保持匿名同步，不打断使用
         sbAuthed=false;
         sbRealtimeActive=false;
         if(sbRealtimeChannel){try{sbClient.removeChannel(sbRealtimeChannel)}catch(e){}}
         sbRealtimeChannel=null;
-        showLoginUI();
-        updateSyncBadge("off","🔐 请登录同步");
+        setupRealtime();
+        pullCloudData(true);
+        updateSyncBadge("on","☁️ 已连接");
       }
     });
   }catch(err){
@@ -9952,7 +9951,7 @@ let sbRealtimeActive=false;      // 实时订阅是否已激活（用于订阅�
 let sbRealtimeTimer=null;        // 实时事件防抖定时器
 let sbRealtimeLastPayload=null;  // 最近一次由本机推送的载荷，用于回声对比
 function setupRealtime(){
-  if(!sbClient||!sbInitialized||!sbAuthed)return;
+  if(!sbClient||!sbInitialized)return;
   if(sbRealtimeChannel){try{sbClient.removeChannel(sbRealtimeChannel)}catch(e){}}
   try{
     sbRealtimeChannel=sbClient.channel("taskboard-rt");
@@ -10064,7 +10063,6 @@ function applyCloudPayload(data){
 }
 async function pushCloudData(){
   if(!sbClient||!sbInitialized)return;
-  if(!sbAuthed){updateSyncBadge("off","🔐 请登录同步");return}
   if(sbSyncing){sbPendingSync=true;return}
   sbSyncing=true;
   updateSyncBadge("spin","同步中…");
@@ -10096,7 +10094,6 @@ async function pushCloudData(){
 }
 async function pullCloudData(silent){
   if(!sbClient||!sbInitialized)return;
-  if(!sbAuthed){updateSyncBadge("off","🔐 请登录同步");return}
   if(!silent)updateSyncBadge("spin","拉取中…");
   try{
     const {data,error}=await sbClient.from("taskboard_data").select("data,updated_at").limit(1);
@@ -10137,7 +10134,6 @@ async function pullCloudData(silent){
 }
 function scheduleSyncPush(){
   if(!sbClient||!sbInitialized)return;
-  if(!sbAuthed)return; // 未登录不调度推送
   // 记录本地有待推送的修改及时间（用于拉取时的冲突保护）；应用云端数据时除外
   if(!window.__sbApplyingCloud){try{localStorage.setItem("taskBoard_localDirty",new Date().toISOString())}catch(e){}}
   if(sbSyncTimer)clearTimeout(sbSyncTimer);
@@ -10145,12 +10141,11 @@ function scheduleSyncPush(){
 }
 // 手动同步：点右上角同步徽标触发，先拉取云端最新，再把本地推上去
 async function manualSync(){
-  if(!sbClient||!sbInitialized){toast("云同步未配置，请先登录并配置");return}
-  if(!sbAuthed){toast("请先登录后再同步");return}
+  if(!sbClient||!sbInitialized){toast("云同步未配置，请先保存 Supabase 配置");return}
   updateSyncBadge("spin","同步中…");
   try{
     await pullCloudData(true);
-    if(sbAuthed)await pushCloudData();
+    await pushCloudData();
     toast("手动同步完成");
   }catch(e){
     toast("同步失败："+(e&&e.message||e));
@@ -10254,9 +10249,10 @@ async function handleLogout(){
   }
   sbAuthed=false;
   localStorage.removeItem("taskBoard_user");
-  showLoginUI();
-  updateSyncBadge("off","🔐 请登录同步");
-  toast("已退出");
+  // 登出后保持匿名同步（云同步不中断，仅去掉账号标识）
+  try{$("loginOverlay").style.display="none"}catch(e){}
+  updateSyncBadge("on","☁️ 已连接");
+  toast("已退出（匿名模式继续同步）");
 }
 function enterGuest(){
   $("loginOverlay").style.display="none";
