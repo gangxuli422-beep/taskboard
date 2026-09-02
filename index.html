@@ -9984,7 +9984,6 @@ function setupRealtime(){
           applyCloudPayload(cloud);
           localStorage.setItem("taskBoard_lastSync",new Date().toISOString());
           updateSyncBadge("on","☁️ 已同步");
-          toast("已实时同步最新数据");
         }
       },300);
     }).subscribe(function(status){
@@ -10123,13 +10122,11 @@ async function pullCloudData(silent){
         }
         applyCloudPayload(cloud);
         localStorage.setItem("taskBoard_lastSync",new Date().toISOString());
-        if(!silent)toast("已从云端拉取最新数据");
       }
     }
     updateSyncBadge("on","☁️ 已连接");
   }catch(err){
     updateSyncBadge("off","⚠️ 拉取失败");
-    if(!silent)toast("拉取失败："+err.message);
   }
 }
 function scheduleSyncPush(){
