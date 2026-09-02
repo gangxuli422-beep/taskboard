@@ -1225,7 +1225,7 @@
     <div class="user-bar" id="userBar" style="display:none">
       <div class="avatar" id="userAvatar">U</div>
       <span id="userEmail"></span>
-      <span class="sync-badge sync-off" id="syncBadge" title="未连接云同步">☁️ 离线</span>
+      <span class="sync-badge sync-off" id="syncBadge" title="点击立即与云端同步" onclick="manualSync()" style="cursor:pointer">☁️ 离线</span>
       <button class="btn-logout" onclick="handleLogout()">退出</button>
     </div>
     <div class="search-box" id="headerSearchBox">
@@ -2919,6 +2919,11 @@ function init(){
   updateAIStatusDot();
   // 定期从云端拉取数据（每60秒）
   setInterval(()=>{pullCloudData(true)},60000);
+  // 手机/电脑从后台切回前台时立即拉取一次，避免长时间挂后台错过云端更新
+  document.addEventListener("visibilitychange",function(){
+    if(document.visibilityState==="visible"&&sbAuthed)pullCloudData(true);
+  });
+  window.addEventListener("pageshow",function(e){if(e.persisted&&sbAuthed)pullCloudData(true)});
   // 启动超时检查
   restartTimeoutCheck();
   // 启动本地提醒调度器
@@ -9938,6 +9943,7 @@ function buildCloudPayload(){
 }
 function applyCloudPayload(data){
   if(!data)return;
+  window.__sbApplyingCloud=true; // 标记正在应用云端数据，避免 saveAll 误把它当成本地修改
   let changed=false;
   if(data.tasks&&Array.isArray(data.tasks)){TASKS=data.tasks;changed=true}
   if(data.library&&Array.isArray(data.library)){LIBRARY=data.library;changed=true}
@@ -9995,6 +10001,8 @@ function applyCloudPayload(data){
     }
   }
   if(changed){migratePersonId();syncColumnsToPerson();saveAll();renderAll()}
+  try{localStorage.removeItem("taskBoard_localDirty")}catch(e){}
+  window.__sbApplyingCloud=false;
   return changed;
 }
 async function pushCloudData(){
@@ -10011,6 +10019,9 @@ async function pushCloudData(){
       const {error:err2}=await sbClient.from("taskboard_data").upsert({id:"main",data:payload,updated_at:new Date().toISOString(),updated_by:payload.updatedBy});
       if(err2)throw err2;
     }
+    // 推送成功：本地数据已安全上云，更新同步基准时间并清除待推送标记
+    try{localStorage.removeItem("taskBoard_localDirty")}catch(e){}
+    localStorage.setItem("taskBoard_lastSync",new Date().toISOString());
     updateSyncBadge("on","☁️ 已同步");
     sbFailCount=0;
   }catch(err){
@@ -10045,6 +10056,15 @@ async function pullCloudData(silent){
       const cloudTime=new Date(cloud.updatedAt||data[0].updated_at||0).getTime();
       const localLast=localStorage.getItem("taskBoard_lastSync")?new Date(localStorage.getItem("taskBoard_lastSync")).getTime():0;
       if(cloudTime>localLast){
+        // 冲突保护：本地有比云端更新的未推送修改（此前推送失败/离线编辑）→ 保留本地并补推送（后写优先），
+        // 避免自动拉取把用户刚编辑过的数据用云端旧数据覆盖掉
+        var dirty=localStorage.getItem("taskBoard_localDirty");
+        var dirtyTime=dirty?new Date(dirty).getTime():0;
+        if(dirtyTime>cloudTime){
+          updateSyncBadge("on","☁️ 已连接");
+          scheduleSyncPush();
+          return;
+        }
         applyCloudPayload(cloud);
         localStorage.setItem("taskBoard_lastSync",new Date().toISOString());
         if(!silent)toast("已从云端拉取最新数据");
@@ -10059,8 +10079,23 @@ async function pullCloudData(silent){
 function scheduleSyncPush(){
   if(!sbClient||!sbInitialized)return;
   if(!sbAuthed)return; // 未登录不调度推送
+  // 记录本地有待推送的修改及时间（用于拉取时的冲突保护）；应用云端数据时除外
+  if(!window.__sbApplyingCloud){try{localStorage.setItem("taskBoard_localDirty",new Date().toISOString())}catch(e){}}
   if(sbSyncTimer)clearTimeout(sbSyncTimer);
   sbSyncTimer=setTimeout(()=>{pushCloudData()},2000);
+}
+// 手动同步：点右上角同步徽标触发，先拉取云端最新，再把本地推上去
+async function manualSync(){
+  if(!sbClient||!sbInitialized){toast("云同步未配置，请先登录并配置");return}
+  if(!sbAuthed){toast("请先登录后再同步");return}
+  updateSyncBadge("spin","同步中…");
+  try{
+    await pullCloudData(true);
+    if(sbAuthed)await pushCloudData();
+    toast("手动同步完成");
+  }catch(e){
+    toast("同步失败："+(e&&e.message||e));
+  }
 }
 
 /* ============ LOGIN (Supabase Auth) ============ */
