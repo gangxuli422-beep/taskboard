@@ -9880,6 +9880,7 @@ function initSupabase(){
         sbAuthed=true;
         showLoggedIn(data.session.user.email||"用户");
         pullCloudData(true);
+        setupRealtime(); // 已有登录态时自动开启实时订阅
       }else{
         // 未登录，不拉取（RLS 下 anon 无权限）
         updateSyncBadge("off","🔐 请登录同步");
@@ -9891,8 +9892,12 @@ function initSupabase(){
         sbAuthed=true;
         showLoggedIn(session.user.email||"用户");
         pullCloudData(true);
+        setupRealtime(); // 登录后订阅实时推送（秒级同步）
       }else if(event==="SIGNED_OUT"){
         sbAuthed=false;
+        sbRealtimeActive=false;
+        if(sbRealtimeChannel){try{sbClient.removeChannel(sbRealtimeChannel)}catch(e){}}
+        sbRealtimeChannel=null;
         showLoginUI();
         updateSyncBadge("off","🔐 请登录同步");
       }
@@ -9941,6 +9946,58 @@ function buildCloudPayload(){
     updatedBy:localStorage.getItem("taskBoard_user")||"guest"
   };
 }
+/* ---- 实时同步（秒级） ---- */
+let sbRealtimeChannel=null;      // 当前实时订阅频道
+let sbRealtimeActive=false;      // 实时订阅是否已激活（用于订阅回调中的回声抑制）
+let sbRealtimeTimer=null;        // 实时事件防抖定时器
+let sbRealtimeLastPayload=null;  // 最近一次由本机推送的载荷，用于回声对比
+function setupRealtime(){
+  if(!sbClient||!sbInitialized||!sbAuthed)return;
+  if(sbRealtimeChannel){try{sbClient.removeChannel(sbRealtimeChannel)}catch(e){}}
+  try{
+    sbRealtimeChannel=sbClient.channel("taskboard-rt");
+    sbRealtimeChannel.on("postgres_changes",{event:"*",schema:"public",table:"taskboard_data"},function(payload){
+      if(payload.eventType==="DELETE")return;
+      if(!payload.new||!payload.new.data)return;
+      // 回声抑制：该更新来自本机刚刚的推送（同一 payload 内容），直接忽略，避免循环
+      if(window.__sbApplyingCloud)return;
+      if(sbRealtimeLastPayload&&sbRealtimeLastPayload===payload.new.data){
+        sbRealtimeLastPayload=null;
+        return;
+      }
+      if(sbRealtimeTimer)clearTimeout(sbRealtimeTimer);
+      var sender=payload.new.updated_by||"";
+      var localUser=localStorage.getItem("taskBoard_user")||"";
+      var isSelf=sender&&sender===localUser;
+      sbRealtimeTimer=setTimeout(function(){
+        // 本地有待推送的修改时，不让实时推送覆盖（后写优先，等本地推送完成后云端自然合并）
+        var dirty=localStorage.getItem("taskBoard_localDirty");
+        var dirtyTime=dirty?new Date(dirty).getTime():0;
+        var cloudTime=new Date(payload.new.updated_at||0).getTime();
+        if(dirtyTime>cloudTime){
+          scheduleSyncPush();
+          return;
+        }
+        var cloud=payload.new.data;
+        var cloudTime2=new Date(cloud.updatedAt||payload.new.updated_at||0).getTime();
+        var localLast=localStorage.getItem("taskBoard_lastSync")?new Date(localStorage.getItem("taskBoard_lastSync")).getTime():0;
+        if(cloudTime2>localLast||(!isSelf&&dirtyTime<=cloudTime2)){
+          applyCloudPayload(cloud);
+          localStorage.setItem("taskBoard_lastSync",new Date().toISOString());
+          updateSyncBadge("on","☁️ 已同步");
+          toast("已实时同步最新数据");
+        }
+      },300);
+    }).subscribe(function(status){
+      if(status==="SUBSCRIBED"){sbRealtimeActive=true;updateSyncBadge("on","☁️ 已连接")}
+      else if(status==="CHANNEL_ERROR"||status==="TIMED_OUT"||status==="CLOSED"){sbRealtimeActive=false;}
+    });
+  }catch(e){
+    console.error("realtime setup error:",e);
+    sbRealtimeActive=false;
+  }
+}
+/* ---- 实时同步 ---- */
 function applyCloudPayload(data){
   if(!data)return;
   window.__sbApplyingCloud=true; // 标记正在应用云端数据，避免 saveAll 误把它当成本地修改
@@ -10022,6 +10079,8 @@ async function pushCloudData(){
     // 推送成功：本地数据已安全上云，更新同步基准时间并清除待推送标记
     try{localStorage.removeItem("taskBoard_localDirty")}catch(e){}
     localStorage.setItem("taskBoard_lastSync",new Date().toISOString());
+    // 记录本次推送载荷，供实时订阅回声抑制（避免自己推的自己又拉回来触发一次渲染）
+    sbRealtimeLastPayload=payload;
     updateSyncBadge("on","☁️ 已同步");
     sbFailCount=0;
   }catch(err){
