@@ -656,7 +656,7 @@
   .export-btn .t{font-size:13.5px;font-weight:800}
   .export-btn .d{font-size:11.5px;color:var(--ink-faint);margin-top:3px}
 
-  .toast{position:fixed;top:68px;left:50%;transform:translateX(-50%) translateY(-8px);background:var(--ink);color:#fff;padding:11px 20px;border-radius:999px;font-size:12.5px;font-weight:700;z-index:500;opacity:0;transition:all .35s;pointer-events:none;box-shadow:0 12px 30px rgba(44,40,62,.3);max-width:90vw;text-align:center}
+  .toast{position:fixed;top:68px;left:50%;transform:translateX(-50%) translateY(-8px);background:var(--ink);color:#fff;padding:11px 20px;border-radius:14px;font-size:12.5px;font-weight:700;z-index:500;opacity:0;transition:all .35s;pointer-events:none;box-shadow:0 12px 30px rgba(44,40,62,.3);max-width:90vw;text-align:center;white-space:pre-line;line-height:1.6}
   .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
   .egg{position:fixed;right:18px;bottom:12px;z-index:50;font-size:10.5px;color:var(--ink-faint);opacity:.75;cursor:pointer;transition:all .25s;user-select:none}
   .egg:hover{opacity:1;transform:scale(1.06);color:#ff7a59}
@@ -2217,7 +2217,7 @@ function fmtDateShort(d){if(!d)return"";const dt=new Date(d);if(isNaN(dt))return
 function daysBetween(a,b){const ms=new Date(b)-new Date(a);return Math.floor(ms/86400000)}
 function todayStr(){const d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")}
 function nowInputVal(){const d=new Date();d.setMinutes(d.getMinutes()-d.getTimezoneOffset());return d.toISOString().slice(0,16)}
-function toast(msg){const t=$("toast");t.textContent=msg;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2200)}
+function toast(msg,ms){const t=$("toast");t.textContent=msg;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),ms||(msg.length>60?6000:2200))}
 
 /* ============ 手机端 header 高度动态适配 ============ */
 /* 微信内核 sticky 支持不稳定，已改 fixed + body padding；
@@ -2665,9 +2665,28 @@ function getProxyUrl(){
   if(WEBHOOK_PROXY_URL)return WEBHOOK_PROXY_URL.replace(/\/$/,"");
   return "";
 }
-// 统一 Webhook 发送函数（自动走代理）
+// 统一 Webhook 发送函数（自动走代理，带超时+备用代理重试）
 // url: 企业微信 webhook 地址
 // content: 文本消息内容（或传入 msgObj 自定义消息体）
+// FALLBACK_PROXY: 主代理不通时的备用代理（可配多个，依次尝试）
+var WEBHOOK_FALLBACK_PROXIES=[
+  "https://taskboard-webhook-proxy.gangxuli422.workers.dev"
+];
+function fetchWithTimeout(target,body,timeoutMs){
+  return new Promise(function(resolve,reject){
+    var done=false;
+    var timer=setTimeout(function(){
+      if(!done){done=true;reject(new Error("请求超时（"+Math.round(timeoutMs/1000)+"秒），代理服务器无响应"))}
+    },timeoutMs||12000);
+    fetch(target,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}).then(function(r){
+      return r.json();
+    }).then(function(j){
+      if(!done){done=true;clearTimeout(timer);resolve(j)}
+    }).catch(function(e){
+      if(!done){done=true;clearTimeout(timer);reject(e)}
+    });
+  });
+}
 async function webhookProxyFetch(url,content,msgObj){
   if(!url)return {errcode:-1,errmsg:"Webhook 地址为空"};
   var proxyUrl=getProxyUrl();
@@ -2688,8 +2707,21 @@ async function webhookProxyFetch(url,content,msgObj){
   }else{
     body.content=content||"";
   }
-  var resp2=await fetch(proxyUrl,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-  return await resp2.json();
+  // 依次尝试主代理 → 备用代理，任一成功即返回
+  var proxies=[proxyUrl];
+  WEBHOOK_FALLBACK_PROXIES.forEach(function(p){
+    if(p&&p!==proxyUrl&&proxies.indexOf(p)<0)proxies.push(p);
+  });
+  var lastErr=null;
+  for(var i=0;i<proxies.length;i++){
+    try{
+      var j=await fetchWithTimeout(proxies[i],body,12000);
+      return j;
+    }catch(e){
+      lastErr=e;
+    }
+  }
+  throw new Error("无法连接代理服务器（"+lastErr.message+"）\n可能原因：①当前网络环境限制（公司/公共网络拦截）②浏览器插件拦截 ③请换网络（如手机热点）或稍后重试");
 }
 
 /* ============ ORG TREE (组织架构树) ============ */
@@ -4546,10 +4578,10 @@ async function sendSchedWebhook(manual){
         saveSchedNotify();
       }
     }else{
-      toast("⚠️ 推送失败："+(data.errmsg||JSON.stringify(data)));
+      toast("⚠️ 推送失败："+(data.errmsg||JSON.stringify(data)),8000);
     }
   }catch(err){
-    toast("⚠️ 网络错误："+err.message+"\n（请检查代理地址配置）");
+    toast("⚠️ 网络错误："+err.message,8000);
   }finally{
     if(btn&&manual)btn.disabled=false;
   }
@@ -4568,10 +4600,10 @@ async function testSchedWebhook(){
     if(data.errcode===0||data.errcode===undefined){
       toast("✅ 测试消息已发送");
     }else{
-      toast("⚠️ 发送失败："+(data.errmsg||JSON.stringify(data)));
+      toast("⚠️ 发送失败："+(data.errmsg||JSON.stringify(data)),8000);
     }
   }catch(err){
-    toast("⚠️ 网络错误："+err.message+"\n（请检查代理地址配置）");
+    toast("⚠️ 网络错误："+err.message,8000);
   }
 }
 function buildSchedSentKey(){
@@ -5672,10 +5704,10 @@ async function sendSched2Webhook(type,manual){
       if(manual)toast("✅ "+conf.title+"已推送到企业微信");
       if(!manual){conf.notify.lastSentKey=sched2SentKey(type);conf.saveNotify();}
     }else{
-      toast("⚠️ 推送失败："+(data.errmsg||JSON.stringify(data)));
+      toast("⚠️ 推送失败："+(data.errmsg||JSON.stringify(data)),8000);
     }
   }catch(err){
-    toast("⚠️ 网络错误："+err.message+"\n（请检查代理地址配置）");
+    toast("⚠️ 网络错误："+err.message,8000);
   }finally{
     if(btn&&manual)btn.disabled=false;
   }
@@ -5692,9 +5724,9 @@ async function testSched2Webhook(type){
     var content="✅ "+conf.testMsg+"\n\n这是来自任务看板的推送测试消息。\n如果你收到了，说明 Webhook 配置正确！\n\n时间："+fmtDate(new Date());
     var data=await webhookProxyFetch(url,content);
     if(data.errcode===0||data.errcode===undefined){toast("✅ 测试消息已发送");}
-    else{toast("⚠️ 发送失败："+(data.errmsg||JSON.stringify(data)));}
+    else{toast("⚠️ 发送失败："+(data.errmsg||JSON.stringify(data)),8000);}
   }catch(err){
-    toast("⚠️ 网络错误："+err.message+"\n（请检查代理地址配置）");
+    toast("⚠️ 网络错误："+err.message,8000);
   }
 }
 // 主播/客服调度器包装（供 conf.startTimer 引用）
@@ -6381,10 +6413,10 @@ async function testWebhook(){
     if(data.errcode===0||data.errcode===undefined){
       toast("✅ 测试消息已发送");
     }else{
-      toast("⚠️ 发送失败："+(data.errmsg||JSON.stringify(data)));
+      toast("⚠️ 发送失败："+(data.errmsg||JSON.stringify(data)),8000);
     }
   }catch(err){
-    toast("⚠️ 网络错误："+err.message+"\n（可能需要配置代理地址，见值日排班页底部）");
+    toast("⚠️ 网络错误："+err.message,8000);
   }
 }
 
@@ -9551,10 +9583,10 @@ async function wrSendWecom(){
     if(data.errcode===0||data.errcode===undefined){
       toast("✅ 周报已推送到企业微信");
     }else{
-      toast("❌ 推送失败："+(data.errmsg||JSON.stringify(data)));
+      toast("❌ 推送失败："+(data.errmsg||JSON.stringify(data)),8000);
     }
   }catch(e){
-    toast("❌ 推送失败："+e.message);
+    toast("❌ 推送失败："+e.message,8000);
   }finally{
     if(btn){btn.disabled=false;btn.textContent="📨 推送到企业微信"}
   }
