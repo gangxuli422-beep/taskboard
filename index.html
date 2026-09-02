@@ -2689,11 +2689,11 @@ function fetchWithTimeout(target,body,timeoutMs){
 }
 async function webhookProxyFetch(url,content,msgObj){
   if(!url)return {errcode:-1,errmsg:"Webhook 地址为空"};
+  var msgBody=msgObj||{msgtype:"text",text:{content:content||""}};
   var proxyUrl=getProxyUrl();
   if(!proxyUrl){
     // 无代理：尝试直连（本地开发时大概率 CORS 失败）
-    var msg=msgObj||{msgtype:"text",text:{content:content||""}};
-    var resp=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(msg)});
+    var resp=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(msgBody)});
     return await resp.json();
   }
   // 走代理
@@ -2721,7 +2721,14 @@ async function webhookProxyFetch(url,content,msgObj){
       lastErr=e;
     }
   }
-  throw new Error("无法连接代理服务器（"+lastErr.message+"）\n可能原因：①当前网络环境限制（公司/公共网络拦截）②浏览器插件拦截 ③请换网络（如手机热点）或稍后重试");
+  // 所有代理都不通 → 降级：浏览器直连企业微信（no-cors，消息可送达但读不到回执）
+  try{
+    await fetch(url,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain"},body:JSON.stringify(msgBody)});
+    // no-cors 读不到响应，无法确认结果；返回假定成功（消息实际已发出）
+    return {errcode:0,errmsg:"ok（直连模式：已发出，无法确认回执）",__direct:true};
+  }catch(e2){
+    throw new Error("代理与直连均失败（代理："+lastErr.message+"；直连："+e2.message+"）\n可能原因：①当前网络环境限制（公司/公共网络拦截）②浏览器插件拦截 ③请换网络（如手机热点）或稍后重试");
+  }
 }
 
 /* ============ ORG TREE (组织架构树) ============ */
@@ -4570,7 +4577,7 @@ async function sendSchedWebhook(manual){
     var data=await webhookProxyFetch(webhook,content);
     if(data.errcode===0||data.errcode===undefined){
       if(manual){
-        toast("✅ 值日表已推送到企业微信");
+        toast("✅ 值日表已推送到企业微信"+(data.__direct?"（直连模式）":""));
       }
       // 记录推送 key（防止重复推送）
       if(!manual){
@@ -4598,7 +4605,7 @@ async function testSchedWebhook(){
     var content="✅ 值日排班推送测试\n\n这是来自任务看板的值日推送测试消息。\n如果你收到了，说明 Webhook 配置正确！\n\n时间："+fmtDate(new Date());
     var data=await webhookProxyFetch(url,content);
     if(data.errcode===0||data.errcode===undefined){
-      toast("✅ 测试消息已发送");
+      toast("✅ 测试消息已发送"+(data.__direct?"（直连模式）":""));
     }else{
       toast("⚠️ 发送失败："+(data.errmsg||JSON.stringify(data)),8000);
     }
@@ -5701,7 +5708,7 @@ async function sendSched2Webhook(type,manual){
   try{
     var data=await webhookProxyFetch(webhook,content);
     if(data.errcode===0||data.errcode===undefined){
-      if(manual)toast("✅ "+conf.title+"已推送到企业微信");
+      if(manual)toast("✅ "+conf.title+"已推送到企业微信"+(data.__direct?"（直连模式）":""));
       if(!manual){conf.notify.lastSentKey=sched2SentKey(type);conf.saveNotify();}
     }else{
       toast("⚠️ 推送失败："+(data.errmsg||JSON.stringify(data)),8000);
@@ -5723,7 +5730,7 @@ async function testSched2Webhook(type){
   try{
     var content="✅ "+conf.testMsg+"\n\n这是来自任务看板的推送测试消息。\n如果你收到了，说明 Webhook 配置正确！\n\n时间："+fmtDate(new Date());
     var data=await webhookProxyFetch(url,content);
-    if(data.errcode===0||data.errcode===undefined){toast("✅ 测试消息已发送");}
+    if(data.errcode===0||data.errcode===undefined){toast("✅ 测试消息已发送"+(data.__direct?"（直连模式）":""));}
     else{toast("⚠️ 发送失败："+(data.errmsg||JSON.stringify(data)),8000);}
   }catch(err){
     toast("⚠️ 网络错误："+err.message,8000);
@@ -6411,7 +6418,7 @@ async function testWebhook(){
     var content="✅ 任务看板通知测试\n\n这是来自"+(personName||"任务看板")+"的测试消息。\n如果你收到了，说明 Webhook 配置正确！\n\n时间："+fmtDate(new Date());
     var data=await webhookProxyFetch(url,content);
     if(data.errcode===0||data.errcode===undefined){
-      toast("✅ 测试消息已发送");
+      toast("✅ 测试消息已发送"+(data.__direct?"（直连模式）":""));
     }else{
       toast("⚠️ 发送失败："+(data.errmsg||JSON.stringify(data)),8000);
     }
@@ -9581,7 +9588,7 @@ async function wrSendWecom(){
   try{
     var data=await webhookProxyFetch(webhook,content);
     if(data.errcode===0||data.errcode===undefined){
-      toast("✅ 周报已推送到企业微信");
+      toast("✅ 周报已推送到企业微信"+(data.__direct?"（直连模式）":""));
     }else{
       toast("❌ 推送失败："+(data.errmsg||JSON.stringify(data)),8000);
     }
