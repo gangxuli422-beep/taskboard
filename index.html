@@ -2317,16 +2317,20 @@ function getPersonHidden(){
   // 每人独立的折叠状态：HIDDEN 存储 { personId: { colId: bool } }
   return HIDDEN[activePersonId]||{};
 }
-/* ---- 板块管理（每人独立） ---- */
+/* ---- 板块管理（每人独立；未选人员时存到 _default 共享组） ---- */
 function getPersonColumns(){
-  if(!activePersonId)return DEFAULT_COLUMNS.slice();
+  if(!activePersonId){
+    const def=PERSON_COLUMNS["_default"];
+    if(def&&Array.isArray(def)&&def.length>0)return def;
+    return DEFAULT_COLUMNS.slice();
+  }
   const cols=PERSON_COLUMNS[activePersonId];
   if(!cols||!Array.isArray(cols)||cols.length===0)return DEFAULT_COLUMNS.slice();
   return cols;
 }
 function savePersonColumns(){
-  if(!activePersonId)return;
-  PERSON_COLUMNS[activePersonId]=COLUMNS.slice();
+  const key=activePersonId||"_default";
+  PERSON_COLUMNS[key]=COLUMNS.slice();
   localStorage.setItem(K_COLUMNS,JSON.stringify(PERSON_COLUMNS));
   touchField("personColumns");
   scheduleSyncPush();
@@ -6533,6 +6537,7 @@ function saveColumnManager(){
   }
   savePersonColumns();
   closeModalById("colMgmtModal");
+  renderBoard();
   applyFilter();
   renderStats();
   toast("板块已保存");
@@ -10265,7 +10270,9 @@ function mergeCloudPayload(data){
     const cloudT=(cloudMeta[field+"_t"]||"").toString();
     const localT=SYNC_META[field+"_t"]||"";
     const cloudValid=cloudVal!==undefined&&cloudVal!==null&&(isArr?(Array.isArray(cloudVal)&&cloudVal.length>0):(typeof cloudVal==="object"&&!Array.isArray(cloudVal)));
-    const cloudIsNewer=cloudT?(!localT||cloudT>localT):!localHasData;
+    // ★修复"删除后回来"：云端旧数据无 fieldMeta 时，仅当本地也无时间戳且无数据（真正首次同步）才采用云端；
+    // 本地有时间戳意味着本地做过有意修改（包括删空），不被无时间戳的旧云端数据反向覆盖
+    const cloudIsNewer=cloudT?(!localT||cloudT>localT):(!localT&&!localHasData);
     if(cloudValid&&cloudIsNewer){
       setter(cloudVal);
       changed=true;
@@ -10294,7 +10301,7 @@ function mergeCloudPayload(data){
       const localT=SYNC_META[key+"_t"]||"";
       const cur=getCur();
       const localHasData=cur&&Object.keys(cur).length>0;
-      const cloudIsNewer=cloudT?(!localT||cloudT>localT):!localHasData;
+      const cloudIsNewer=cloudT?(!localT||cloudT>localT):(!localT&&!localHasData);
       if(cloudIsNewer){
         const curWebhook=cur?(cur.webhook||"").trim():"";
         let merged=Object.assign({},cv);
