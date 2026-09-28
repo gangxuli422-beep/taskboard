@@ -2257,7 +2257,7 @@ function touchField(field){
   SYNC_META[field+"_t"]=new Date().toISOString();
   saveSyncMeta();
 }
-function saveAll(){
+function saveAll(skipFieldTouch){
   localStorage.setItem(K_TASKS,JSON.stringify(TASKS));
   localStorage.setItem(K_LIB,JSON.stringify(LIBRARY));
   localStorage.setItem(K_PUB,JSON.stringify(PUBLISH));
@@ -2277,7 +2277,11 @@ function saveAll(){
   localStorage.setItem(K_PROXY,WEBHOOK_PROXY_URL);
   localStorage.setItem(K_QBANK,JSON.stringify(QBANK));
   localStorage.setItem(K_KBANK,JSON.stringify(KBANK));
-  ["tasks","library","publish","videolinks","benchmarks","accounts","hidden","persons","orgTree","personColumns","notifySettings","schedData","schedNotify","schedAnchor","schedAnchorNotify","schedService","schedServiceNotify","webhookProxy","qbank","kbank"].forEach(touchField);
+  // 云端合并等批量落盘场景 skipFieldTouch=true：不刷新各字段时间戳，
+  // 避免"合并一次→全部字段时间戳变最新→推送回去→其他设备又判定本机更新"的时间戳虚高循环
+  if(!skipFieldTouch){
+    ["tasks","library","publish","videolinks","benchmarks","accounts","hidden","persons","orgTree","personColumns","notifySettings","schedData","schedNotify","schedAnchor","schedAnchorNotify","schedService","schedServiceNotify","webhookProxy","qbank","kbank"].forEach(touchField);
+  }
   scheduleSyncPush();
 }
 /* ---- 人员数据隔离辅助 ----
@@ -2333,6 +2337,10 @@ function savePersonColumns(){
   PERSON_COLUMNS[key]=COLUMNS.slice();
   localStorage.setItem(K_COLUMNS,JSON.stringify(PERSON_COLUMNS));
   touchField("personColumns");
+  // 每位成员的板块独立时间戳：云同步按成员合并，避免其他成员/设备的推送整包覆盖本机刚保存的板块
+  if(!SYNC_META)SYNC_META={};
+  SYNC_META["pc_"+key+"_t"]=new Date().toISOString();
+  saveSyncMeta();
   scheduleSyncPush();
 }
 function loadPersonColumns(){
@@ -2342,6 +2350,7 @@ function loadPersonColumns(){
 function syncColumnsToPerson(){
   // 切换人员时更新 COLUMNS
   COLUMNS=getPersonColumns();
+  refreshColumnFilterOptions();
 }
 /* ---- 通知设置（每人独立） ---- */
 function getNotifySettings(pid){
@@ -6524,6 +6533,7 @@ function deleteColumn(id){
   if(idx<0)return;
   deleteColumnInline(idx);
   savePersonColumns();
+  refreshColumnFilterOptions();
   applyFilter();
   renderStats();
 }
@@ -6536,6 +6546,7 @@ function saveColumnManager(){
     }
   }
   savePersonColumns();
+  refreshColumnFilterOptions();
   closeModalById("colMgmtModal");
   renderBoard();
   applyFilter();
@@ -7792,9 +7803,18 @@ let batchSelected=new Set();
 function initFilter(){
   const ownerSel=$("filterOwner");
   const colSel=$("filterColumn");
+  refreshColumnFilterOptions();
+  refreshOwnerFilter();
+}
+function refreshColumnFilterOptions(){
+  // 板块发生变化（新建/删除/改名/切换人员）后刷新下拉选项，否则 select 无对应 option，
+  // 赋值会被浏览器回退成"全部"，导致点击板块筛选取值丢失
+  const colSel=$("filterColumn");
+  if(!colSel)return;
+  const cur=colSel.value;
   colSel.innerHTML='<option value="">全部</option>';
   COLUMNS.forEach(c=>{const o=document.createElement("option");o.value=c.id;o.textContent=c.emoji+" "+c.name;colSel.appendChild(o)});
-  refreshOwnerFilter();
+  if(cur&&COLUMNS.some(c=>c.id===cur))colSel.value=cur;
 }
 function refreshOwnerFilter(){
   const ownerSel=$("filterOwner");
@@ -10290,7 +10310,37 @@ function mergeCloudPayload(data){
   mergeField("qbank",data.qbank,true,v=>{QBANK=v;localStorage.setItem(K_QBANK,JSON.stringify(QBANK))},QBANK.length>0);
   mergeField("kbank",data.kbank,true,v=>{KBANK=v;localStorage.setItem(K_KBANK,JSON.stringify(KBANK))},KBANK.length>0);
   mergeField("hidden",data.hidden,false,v=>{HIDDEN=v},Object.keys(HIDDEN).length>0);
-  mergeField("personColumns",data.personColumns,false,v=>{PERSON_COLUMNS=v;localStorage.setItem(K_COLUMNS,JSON.stringify(v))},Object.keys(PERSON_COLUMNS).length>0);
+  // personColumns：按成员合并（每位成员带独立时间戳 pc_<pid>_t），
+  // 防止任一设备的整体推送覆盖其他成员/本机刚保存的板块（旧版无独立时间戳时保留本地）
+  if(data.personColumns&&typeof data.personColumns==="object"&&!Array.isArray(data.personColumns)){
+    const cloudPC=data.personColumns;
+    const localPC=PERSON_COLUMNS||{};
+    const merged=Object.assign({},cloudPC);
+    let pcChanged=false;
+    for(const k of Object.keys(localPC)){
+      const localArr=localPC[k];
+      if(!(k in merged)){
+        // 云端缺失该成员（本机新增）→ 保留本地
+        if(Array.isArray(localArr)&&localArr.length>0){merged[k]=localArr;pcChanged=true}
+        continue;
+      }
+      const cloudArr=merged[k];
+      if(!Array.isArray(localArr)||localArr.length===0)continue;      // 本地为空 → 采用云端
+      if(!Array.isArray(cloudArr)||cloudArr.length===0){merged[k]=localArr;pcChanged=true;continue}
+      const lt=SYNC_META["pc_"+k+"_t"]||"";
+      const ct=(cloudMeta["pc_"+k+"_t"]||"").toString();
+      // 双端都有数据：有成员时间戳则取更新者；云端无成员时间戳（旧设备推送）→ 保留本地编辑
+      if(!ct){merged[k]=localArr;pcChanged=true}
+      else if(lt&&lt>=ct){merged[k]=localArr;pcChanged=true}
+      // 云端时间戳更新（ct>lt 或仅云端有）→ 保持云端
+    }
+    if(pcChanged||Object.keys(merged).length!==Object.keys(PERSON_COLUMNS).length){
+      PERSON_COLUMNS=merged;
+      localStorage.setItem(K_COLUMNS,JSON.stringify(PERSON_COLUMNS));
+      changed=true;
+      merges.push("personColumns");
+    }
+  }
   mergeField("notifySettings",data.notifySettings,false,v=>{NOTIFY_SETTINGS=v;localStorage.setItem(K_NOTIFY,JSON.stringify(v))},Object.keys(NOTIFY_SETTINGS).length>0);
   mergeField("schedData",data.schedData,false,v=>{SCHED_DATA=v;localStorage.setItem(K_SCHED,JSON.stringify(v))},Object.keys(SCHED_DATA).length>0);
   // 三个排班 webhook 地址彼此独立：本地已填优先保留，仅本地为空时采用云端 webhook
@@ -10341,7 +10391,7 @@ function mergeCloudPayload(data){
     merges.forEach(f=>{SYNC_META[f+"_t"]=(cloudMeta[f+"_t"])||new Date().toISOString()});
     saveSyncMeta();
     window.__sbApplyingCloud=true;
-    try{migratePersonId();syncColumnsToPerson();saveAll();renderAll();try{localStorage.removeItem("taskBoard_localDirty")}catch(e){}}
+    try{migratePersonId();syncColumnsToPerson();saveAll(true);renderAll();try{localStorage.removeItem("taskBoard_localDirty")}catch(e){}}
     finally{window.__sbApplyingCloud=false}
   }
   return changed;
@@ -10359,11 +10409,14 @@ function setupRealtime(){
     sbRealtimeChannel.on("postgres_changes",{event:"*",schema:"public",table:"taskboard_data"},function(payload){
       if(payload.eventType==="DELETE")return;
       if(!payload.new||!payload.new.data)return;
-      // 回声抑制：该更新来自本机刚刚的推送（同一 payload 内容），直接忽略，避免循环
+// 应用云端数据的过程中不再处理实时事件，避免循环
       if(window.__sbApplyingCloud)return;
-      if(sbRealtimeLastPayload&&sbRealtimeLastPayload===payload.new.data){
-        sbRealtimeLastPayload=null;
-        return;
+      // 回声抑制：按内容比较（引用比较对"自身推送被数据库解析回传"的对象永远不相等，
+      // 会导致本机推送的回声反复触发合并→时间戳虚高→覆盖他人/本机新编辑）
+      if(sbRealtimeLastPayload){
+        var isEcho=false;
+        try{isEcho=JSON.stringify(sbRealtimeLastPayload)===JSON.stringify(payload.new.data)}catch(e){}
+        if(isEcho){sbRealtimeLastPayload=null;return;}
       }
       if(sbRealtimeTimer)clearTimeout(sbRealtimeTimer);
       var sender=payload.new.updated_by||"";
