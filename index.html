@@ -2245,6 +2245,18 @@ window.addEventListener("resize",function(){
 });
 
 /* ============ LOAD / SAVE ============ */
+/* ---- 字段级同步时间戳（云同步按字段合并的基础，防止旧设备整行覆盖本地新增） ---- */
+const K_SYNC_META="taskBoard_sync_meta_v1";
+let SYNC_META=loadSyncMeta();
+function loadSyncMeta(){
+  try{return JSON.parse(localStorage.getItem(K_SYNC_META)||"{}")||{}}catch(e){return{}}
+}
+function saveSyncMeta(){try{localStorage.setItem(K_SYNC_META,JSON.stringify(SYNC_META))}catch(e){}}
+function touchField(field){
+  if(!SYNC_META)SYNC_META={};
+  SYNC_META[field+"_t"]=new Date().toISOString();
+  saveSyncMeta();
+}
 function saveAll(){
   localStorage.setItem(K_TASKS,JSON.stringify(TASKS));
   localStorage.setItem(K_LIB,JSON.stringify(LIBRARY));
@@ -2265,6 +2277,7 @@ function saveAll(){
   localStorage.setItem(K_PROXY,WEBHOOK_PROXY_URL);
   localStorage.setItem(K_QBANK,JSON.stringify(QBANK));
   localStorage.setItem(K_KBANK,JSON.stringify(KBANK));
+  ["tasks","library","publish","videolinks","benchmarks","accounts","hidden","persons","orgTree","personColumns","notifySettings","schedData","schedNotify","schedAnchor","schedAnchorNotify","schedService","schedServiceNotify","webhookProxy","qbank","kbank"].forEach(touchField);
   scheduleSyncPush();
 }
 /* ---- 人员数据隔离辅助 ----
@@ -2315,6 +2328,7 @@ function savePersonColumns(){
   if(!activePersonId)return;
   PERSON_COLUMNS[activePersonId]=COLUMNS.slice();
   localStorage.setItem(K_COLUMNS,JSON.stringify(PERSON_COLUMNS));
+  touchField("personColumns");
   scheduleSyncPush();
 }
 function loadPersonColumns(){
@@ -2366,6 +2380,7 @@ function saveNotifySettings(pid,settings){
   if(!id)return;
   NOTIFY_SETTINGS[id]=settings;
   localStorage.setItem(K_NOTIFY,JSON.stringify(NOTIFY_SETTINGS));
+  touchField("notifySettings");
   scheduleSyncPush();
 }
 function loadNotifySettings(){
@@ -2510,15 +2525,15 @@ function schedAutoSelectCurrent(){
     schedGenerateNext();
   }
 }
-function saveTasks(){localStorage.setItem(K_TASKS,JSON.stringify(TASKS));scheduleSyncPush()}
-function saveLibrary(){localStorage.setItem(K_LIB,JSON.stringify(LIBRARY));scheduleSyncPush()}
-function savePublish(){localStorage.setItem(K_PUB,JSON.stringify(PUBLISH));scheduleSyncPush()}
-function saveVideoLinks(){localStorage.setItem(K_VL,JSON.stringify(VIDEOLINKS));scheduleSyncPush()}
-function saveBenchmarks(){localStorage.setItem(K_BENCH,JSON.stringify(BENCHMARKS));scheduleSyncPush()}
-function saveAccounts(){localStorage.setItem(K_ACC,JSON.stringify(ACCOUNTS));scheduleSyncPush()}
-function saveHidden(){localStorage.setItem(K_HIDDEN,JSON.stringify(HIDDEN));scheduleSyncPush()}
-function savePersons(){localStorage.setItem(K_PERSONS,JSON.stringify(PERSONS));localStorage.setItem(K_ORGTREE,JSON.stringify(ORG_TREE));scheduleSyncPush()}
-function saveOrgTree(){localStorage.setItem(K_ORGTREE,JSON.stringify(ORG_TREE));scheduleSyncPush()}
+function saveTasks(){localStorage.setItem(K_TASKS,JSON.stringify(TASKS));touchField("tasks");scheduleSyncPush()}
+function saveLibrary(){localStorage.setItem(K_LIB,JSON.stringify(LIBRARY));touchField("library");scheduleSyncPush()}
+function savePublish(){localStorage.setItem(K_PUB,JSON.stringify(PUBLISH));touchField("publish");scheduleSyncPush()}
+function saveVideoLinks(){localStorage.setItem(K_VL,JSON.stringify(VIDEOLINKS));touchField("videolinks");scheduleSyncPush()}
+function saveBenchmarks(){localStorage.setItem(K_BENCH,JSON.stringify(BENCHMARKS));touchField("benchmarks");scheduleSyncPush()}
+function saveAccounts(){localStorage.setItem(K_ACC,JSON.stringify(ACCOUNTS));touchField("accounts");scheduleSyncPush()}
+function saveHidden(){localStorage.setItem(K_HIDDEN,JSON.stringify(HIDDEN));touchField("hidden");scheduleSyncPush()}
+function savePersons(){localStorage.setItem(K_PERSONS,JSON.stringify(PERSONS));localStorage.setItem(K_ORGTREE,JSON.stringify(ORG_TREE));touchField("persons");touchField("orgTree");scheduleSyncPush()}
+function saveOrgTree(){localStorage.setItem(K_ORGTREE,JSON.stringify(ORG_TREE));touchField("orgTree");scheduleSyncPush()}
 function loadSchedData(){
   try{SCHED_DATA=JSON.parse(localStorage.getItem(K_SCHED)||"null")}catch(e){SCHED_DATA=null}
   if(!SCHED_DATA||!SCHED_DATA.groups||!Array.isArray(SCHED_DATA.groups)){
@@ -2562,7 +2577,7 @@ function extractRotatableMembers(g){
   });
   return list;
 }
-function saveSchedData(){localStorage.setItem(K_SCHED,JSON.stringify(SCHED_DATA));scheduleSyncPush()}
+function saveSchedData(){localStorage.setItem(K_SCHED,JSON.stringify(SCHED_DATA));touchField("schedData");scheduleSyncPush()}
 function loadSchedNotify(){
   try{SCHED_NOTIFY=JSON.parse(localStorage.getItem(K_SCHED_NOTIFY)||"null")}catch(e){SCHED_NOTIFY=null}
   if(!SCHED_NOTIFY||typeof SCHED_NOTIFY!=="object"||Array.isArray(SCHED_NOTIFY)){
@@ -2576,7 +2591,7 @@ function loadSchedNotify(){
   if(typeof SCHED_NOTIFY.time!=="string"||!SCHED_NOTIFY.time)SCHED_NOTIFY.time="09:00";
   if(typeof SCHED_NOTIFY.lastSentKey!=="string")SCHED_NOTIFY.lastSentKey="";
 }
-function saveSchedNotify(){localStorage.setItem(K_SCHED_NOTIFY,JSON.stringify(SCHED_NOTIFY));scheduleSyncPush()}
+function saveSchedNotify(){localStorage.setItem(K_SCHED_NOTIFY,JSON.stringify(SCHED_NOTIFY));touchField("schedNotify");scheduleSyncPush()}
 
 /* ---- 主播排班 ---- */
 function loadSchedAnchor(){
@@ -2587,7 +2602,7 @@ function loadSchedAnchor(){
   if(!Array.isArray(SCHED_ANCHOR.days))SCHED_ANCHOR.days=[];
   if(!Array.isArray(SCHED_ANCHOR.people))SCHED_ANCHOR.people=["主播A","主播B","主播C"];
 }
-function saveSchedAnchor(){localStorage.setItem(K_SCHED_ANCHOR,JSON.stringify(SCHED_ANCHOR));scheduleSyncPush()}
+function saveSchedAnchor(){localStorage.setItem(K_SCHED_ANCHOR,JSON.stringify(SCHED_ANCHOR));touchField("schedAnchor");scheduleSyncPush()}
 function loadSchedAnchorNotify(){
   try{SCHED_ANCHOR_NOTIFY=JSON.parse(localStorage.getItem(K_SCHED_ANCHOR_NOTIFY)||"null")}catch(e){SCHED_ANCHOR_NOTIFY=null}
   if(!SCHED_ANCHOR_NOTIFY||typeof SCHED_ANCHOR_NOTIFY!=="object"||Array.isArray(SCHED_ANCHOR_NOTIFY)){
@@ -2599,7 +2614,7 @@ function loadSchedAnchorNotify(){
   if(SCHED_ANCHOR_NOTIFY.pushDay!=="today"&&SCHED_ANCHOR_NOTIFY.pushDay!=="tomorrow")SCHED_ANCHOR_NOTIFY.pushDay="tomorrow";
   if(typeof SCHED_ANCHOR_NOTIFY.lastSentKey!=="string")SCHED_ANCHOR_NOTIFY.lastSentKey="";
 }
-function saveSchedAnchorNotify(){localStorage.setItem(K_SCHED_ANCHOR_NOTIFY,JSON.stringify(SCHED_ANCHOR_NOTIFY));scheduleSyncPush()}
+function saveSchedAnchorNotify(){localStorage.setItem(K_SCHED_ANCHOR_NOTIFY,JSON.stringify(SCHED_ANCHOR_NOTIFY));touchField("schedAnchorNotify");scheduleSyncPush()}
 
 /* ---- 客服排班 ---- */
 function loadSchedService(){
@@ -2610,7 +2625,7 @@ function loadSchedService(){
   if(!Array.isArray(SCHED_SERVICE.days))SCHED_SERVICE.days=[];
   if(!Array.isArray(SCHED_SERVICE.people))SCHED_SERVICE.people=["客服A","客服B"];
 }
-function saveSchedService(){localStorage.setItem(K_SCHED_SERVICE,JSON.stringify(SCHED_SERVICE));scheduleSyncPush()}
+function saveSchedService(){localStorage.setItem(K_SCHED_SERVICE,JSON.stringify(SCHED_SERVICE));touchField("schedService");scheduleSyncPush()}
 function loadSchedServiceNotify(){
   try{SCHED_SERVICE_NOTIFY=JSON.parse(localStorage.getItem(K_SCHED_SERVICE_NOTIFY)||"null")}catch(e){SCHED_SERVICE_NOTIFY=null}
   if(!SCHED_SERVICE_NOTIFY||typeof SCHED_SERVICE_NOTIFY!=="object"||Array.isArray(SCHED_SERVICE_NOTIFY)){
@@ -2622,7 +2637,7 @@ function loadSchedServiceNotify(){
   if(SCHED_SERVICE_NOTIFY.pushDay!=="today"&&SCHED_SERVICE_NOTIFY.pushDay!=="tomorrow")SCHED_SERVICE_NOTIFY.pushDay="tomorrow";
   if(typeof SCHED_SERVICE_NOTIFY.lastSentKey!=="string")SCHED_SERVICE_NOTIFY.lastSentKey="";
 }
-function saveSchedServiceNotify(){localStorage.setItem(K_SCHED_SERVICE_NOTIFY,JSON.stringify(SCHED_SERVICE_NOTIFY));scheduleSyncPush()}
+function saveSchedServiceNotify(){localStorage.setItem(K_SCHED_SERVICE_NOTIFY,JSON.stringify(SCHED_SERVICE_NOTIFY));touchField("schedServiceNotify");scheduleSyncPush()}
 
 /* ============ Webhook 代理 (解决 CORS) ============ */
 function loadProxyUrl(){
@@ -2634,13 +2649,13 @@ function loadProxyUrl(){
     try{localStorage.setItem(K_PROXY,"")}catch(e){}
   }
 }
-function saveProxyUrl(){localStorage.setItem(K_PROXY,WEBHOOK_PROXY_URL);scheduleSyncPush()}
+function saveProxyUrl(){localStorage.setItem(K_PROXY,WEBHOOK_PROXY_URL);touchField("webhookProxy");scheduleSyncPush()}
 
 /* ============ 问题库 & 知识库 ============ */
 function loadQBank(){try{QBANK=JSON.parse(localStorage.getItem(K_QBANK)||"[]")}catch(e){QBANK=[]}}
-function saveQBank(){localStorage.setItem(K_QBANK,JSON.stringify(QBANK));scheduleSyncPush()}
+function saveQBank(){localStorage.setItem(K_QBANK,JSON.stringify(QBANK));touchField("qbank");scheduleSyncPush()}
 function loadKBank(){try{KBANK=JSON.parse(localStorage.getItem(K_KBANK)||"[]")}catch(e){KBANK=[]}}
-function saveKBank(){localStorage.setItem(K_KBANK,JSON.stringify(KBANK));scheduleSyncPush()}
+function saveKBank(){localStorage.setItem(K_KBANK,JSON.stringify(KBANK));touchField("kbank");scheduleSyncPush()}
 // 问题库分类
 const QBANK_CATEGORIES=["产品咨询","售后问题","价格问题","技术问题","工作流程","其他"];
 // 知识库分类
@@ -3753,31 +3768,75 @@ function renderAll(){
 }
 
 /* ============ SUMMARY (汇总大屏) ============ */
+let summaryGroupFilter=""; // 汇总大屏当前筛选的组名，""=全部团队
+function getOrgGroups(){
+  const groups=[];
+  (function walk(nodes){
+    (nodes||[]).forEach(n=>{
+      if(n.type==="folder"&&n.name)groups.push(n.name);
+      if(n.children&&n.children.length)walk(n.children);
+    });
+  })(ORG_TREE);
+  return groups;
+}
+function getGroupPersonIds(groupName){
+  const ids=[];
+  (function walk(nodes){
+    (nodes||[]).forEach(n=>{
+      if(n.type==="folder"&&n.name===groupName&&n.children){
+        n.children.forEach(c=>{if(c.type==="person"&&c.personId)ids.push(c.personId)});
+      }
+      if(n.children&&n.children.length)walk(n.children);
+    });
+  })(ORG_TREE);
+  return ids;
+}
+function setSummaryGroup(g){
+  summaryGroupFilter=g||"";
+  renderSummary();
+}
 function renderSummary(){
   // 汇总所有人员在各模块的数据，展示为丰富的大屏
   const board=$("board");
   board.innerHTML="";
+  // —— 按组筛选：非空时只统计该组人员的数据 ——
+  const scopeIds=summaryGroupFilter?getGroupPersonIds(summaryGroupFilter):null; // null=全部
+  const inScope=pid=>scopeIds===null||scopeIds.indexOf(pid)>=0;
+  const membersAll=PERSONS.filter(p=>inScope(p.id));
   // 汇总标题
   const titleBar=document.createElement("div");
   titleBar.style.cssText="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:18px;position:sticky;top:var(--header-h,52px);z-index:60;background:var(--bg);padding:10px 0;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)";
   titleBar.innerHTML=
     '<div style="display:flex;align-items:center;gap:12px"><div style="width:46px;height:46px;border-radius:14px;background:linear-gradient(135deg,#ff8a5c,#ff5f6d);display:flex;align-items:center;justify-content:center;font-size:24px;box-shadow:0 6px 16px rgba(255,95,109,.25)">📊</div>'+
-    '<div><div style="font-size:22px;font-weight:800;color:var(--ink)">团队汇总大屏</div>'+
-    '<div style="font-size:12.5px;color:var(--ink-faint);margin-top:2px">'+PERSONS.length+' 位成员 · '+COLUMNS.length+' 个板块 · 全团队数据一览</div></div></div>'+
+    '<div><div style="font-size:22px;font-weight:800;color:var(--ink)">'+(summaryGroupFilter?esc(summaryGroupFilter)+' 汇总':'团队汇总大屏')+'</div>'+
+    '<div style="font-size:12.5px;color:var(--ink-faint);margin-top:2px">'+(summaryGroupFilter?membersAll.length+' 位成员 · '+COLUMNS.length+' 个板块 · 仅 '+esc(summaryGroupFilter)+' 组数据':PERSONS.length+' 位成员 · '+COLUMNS.length+' 个板块 · 全团队数据一览')+'</div></div></div>'+
     '<div style="font-size:12px;color:var(--ink-faint)">'+todayStr()+' 更新</div>';
   board.appendChild(titleBar);
+  // —— 按组筛选 chips ——
+  const groups=getOrgGroups();
+  const chipRow=document.createElement("div");
+  chipRow.style.cssText="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px";
+  const chipBtn=(label,val,active)=>'<button type="button" onclick="setSummaryGroup(\''+val.replace(/'/g,"\\'")+'\')" style="border:none;cursor:pointer;padding:7px 15px;border-radius:999px;font-size:12.5px;font-weight:700;font-family:inherit;transition:all .2s;background:'+(active?"linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;box-shadow:0 4px 12px rgba(99,102,241,.28)":"#fff;color:var(--ink-soft);border:1.5px solid #ece6dc")+'">'+esc(label)+'</button>';
+  chipRow.innerHTML='<span style="font-size:13px;font-weight:700;color:var(--ink-soft)">👥 按组汇总：</span>'+chipBtn("全部团队","",summaryGroupFilter==="")+groups.map(g=>chipBtn(g,g,summaryGroupFilter===g)).join("");
+  board.appendChild(chipRow);
   // ============ ① 顶部统计卡片（加大字号） ============
-  const totalTasks=TASKS.length;
-  const doneTasks=TASKS.filter(t=>t.completed).length;
+  const scopeTasks=TASKS.filter(t=>inScope(t.personId));
+  const scopeLib=LIBRARY.filter(t=>inScope(t.personId));
+  const scopePub=PUBLISH.filter(t=>inScope(t.personId));
+  const scopeVl=VIDEOLINKS.filter(t=>inScope(t.personId));
+  const scopeBench=BENCHMARKS.filter(t=>inScope(t.personId));
+  const scopeAcc=ACCOUNTS.filter(a=>inScope(a.personId));
+  const totalTasks=scopeTasks.length;
+  const doneTasks=scopeTasks.filter(t=>t.completed).length;
   const todoTasks=totalTasks-doneTasks;
-  const totalLib=LIBRARY.length;
-  const totalPub=PUBLISH.length;
-  const totalVl=VIDEOLINKS.length;
-  const totalBench=BENCHMARKS.length;
-  const totalAcc=ACCOUNTS.filter(a=>a.personId).length+ACCOUNTS.filter(a=>!a.personId).length;
+  const totalLib=scopeLib.length;
+  const totalPub=scopePub.length;
+  const totalVl=scopeVl.length;
+  const totalBench=scopeBench.length;
+  const totalAcc=scopeAcc.length;
   const rate=totalTasks>0?Math.round(doneTasks/totalTasks*100):0;
   // 逾期任务（非每日任务且未完成且超过计划时间）
-  const overdue=TASKS.filter(t=>{
+  const overdue=scopeTasks.filter(t=>{
     if(t.completed)return false;
     if(NO_TIME_COLS.includes(t.column))return false;
     if(!t.taskTime)return false;
@@ -3785,7 +3844,7 @@ function renderSummary(){
   }).length;
   // 临发账号（距下次应发不足1天或逾期未发）
   let soonPub=0;
-  PUBLISH.forEach(p=>{
+  scopePub.forEach(p=>{
     if(!p.lastTime)return;
     const lastDt=new Date(p.lastTime);
     const nextDt=new Date(lastDt.getTime()+(p.freq||2)*86400000);
@@ -3836,10 +3895,10 @@ function renderSummary(){
   const colCard=document.createElement("div");
   colCard.style.cssText="background:#fff;border:1.5px solid #f1ede6;border-radius:16px;padding:18px";
   let colCardHead='<div style="font-size:15px;font-weight:800;color:var(--ink);margin-bottom:14px">📊 板块任务分布</div>';
-  const colMax=Math.max(1,...COLUMNS.map(c=>TASKS.filter(t=>t.column===c.id).length));
+  const colMax=Math.max(1,...COLUMNS.map(c=>scopeTasks.filter(t=>t.column===c.id).length));
   let colBars="";
   COLUMNS.forEach(c=>{
-    const cnt=TASKS.filter(t=>t.column===c.id).length;
+    const cnt=scopeTasks.filter(t=>t.column===c.id).length;
     const pct=Math.round(cnt/colMax*100);
     colBars+='<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">'+
       '<div style="width:96px;font-size:12.5px;color:var(--ink-soft);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+c.emoji+' '+esc(c.name)+'</div>'+
@@ -3853,7 +3912,7 @@ function renderSummary(){
   membersCard.style.cssText="background:#fff;border:1.5px solid #f1ede6;border-radius:16px;padding:18px;display:flex;flex-direction:column";
   let membersHead='<div style="font-size:15px;font-weight:800;color:var(--ink);margin-bottom:14px;flex-shrink:0">👥 成员一览</div>';
   let membersHtml='<div class="members-scroll" id="membersScroll">';
-  PERSONS.forEach((p,i)=>{
+  membersAll.forEach((p,i)=>{
     const pid=p.id;
     const letter=(p.letter||String.fromCharCode(65+i)).toUpperCase();
     const pname=p.name||("人员"+letter);
@@ -3887,7 +3946,7 @@ function renderSummary(){
     '<div>人员</div><div>总任务</div><div>待完成</div><div>已完成</div><div>内容库</div><div>发布账号</div><div>视频链接</div><div>竞品对标</div><div>操作</div></div>';
   const body=document.createElement("div");
   body.style.cssText="min-width:980px";
-  PERSONS.forEach((p,i)=>{
+  membersAll.forEach((p,i)=>{
     const pid=p.id;
     const letter=(p.letter||String.fromCharCode(65+i)).toUpperCase();
     const pname=p.name||("人员"+letter);
@@ -3912,9 +3971,9 @@ function renderSummary(){
       '<div><button class="btn btn-soft" style="font-size:12px;padding:5px 14px" onclick="psSelectPerson(\''+pid+'\')">查看</button></div>';
     body.appendChild(row);
   });
-  // 无 personId 的共享账号单独显示
+  // 无 personId 的共享账号单独显示（仅全部团队视图显示）
   const sharedAcc=ACCOUNTS.filter(a=>!a.personId);
-  if(sharedAcc.length>0){
+  if(sharedAcc.length>0&&!scopeIds){
     const sharedRow=document.createElement("div");
     sharedRow.style.cssText="display:grid;grid-template-columns:110px repeat(8,1fr);gap:8px;align-items:center;padding:14px 10px;border-bottom:1px solid #f6f2ea;font-size:14.5px;background:#fff8f5";
     sharedRow.innerHTML=
@@ -3930,9 +3989,9 @@ function renderSummary(){
 
   // 右：今日动态模块
   const todayStrFull=todayStr();
-  const todayDone=TASKS.filter(t=>t.completed && t.doneDate && t.doneDate.slice(0,10)===todayStrFull).length;
-  const todayTodo=TASKS.filter(t=>!t.completed && t.taskTime && t.taskTime.slice(0,10)===todayStrFull).length;
-  const dueSoon=TASKS.filter(t=>{
+  const todayDone=scopeTasks.filter(t=>t.completed && t.doneDate && t.doneDate.slice(0,10)===todayStrFull).length;
+  const todayTodo=scopeTasks.filter(t=>!t.completed && t.taskTime && t.taskTime.slice(0,10)===todayStrFull).length;
+  const dueSoon=scopeTasks.filter(t=>{
     if(t.completed)return false;
     if(!t.taskTime)return false;
     const diff=Math.ceil((new Date(t.taskTime)-new Date())/86400000);
@@ -8589,9 +8648,21 @@ function openDocUpload(){
   $("docSaveTitle").value="";
   $("docUploadModal").classList.add("show");
 }
+let lastDocTypes=[]; // 最近一次上传文档的类型（用于内容库标注来源格式）
+function docTypeOf(name){
+  const n=(name||"").toLowerCase();
+  if(/\.(ppt|pptx)$/.test(n))return"PPT文档";
+  if(/\.(xls|xlsx)$/.test(n))return"Excel文档";
+  if(/\.(doc|docx)$/.test(n))return"Word文档";
+  if(/\.pdf$/.test(n))return"PDF文档";
+  if(/\.(txt|md|markdown)$/.test(n))return"Markdown/文本";
+  if(/\.csv$/.test(n))return"CSV表格";
+  return"文档";
+}
 function handleDocFiles(files){
   $("docPlaceholder").style.display="none";
   $("docProgress").style.display="block";
+  lastDocTypes=Array.from(files||[]).map(f=>docTypeOf(f.name));
   let allText="";
   let processed=0;
   const total=files.length;
@@ -8693,7 +8764,8 @@ function docSaveToLib(){
   const text=$("docTextResult").value.trim();
   if(!text){toast("没有内容");return}
   const title=$("docSaveTitle").value.trim()||("文档提取 "+fmtDateShort(new Date().toISOString()));
-  LIBRARY.push({id:uid(),title:title,type:"文档提取",content:text,created:new Date().toISOString()});
+  LIBRARY.push({id:uid(),title:title,type:(lastDocTypes&&lastDocTypes[0])||"文档提取",content:text,created:new Date().toISOString()});
+  lastDocTypes=[];
   saveLibrary();
   closeModalById("docUploadModal");
   renderLibrary();
@@ -9941,9 +10013,95 @@ function buildCloudPayload(){
     kbank:KBANK,
     // H5: 云同步不上传 apiKey 明文，仅同步 provider/model/baseUrl 供团队参考
     aiConfig:(()=>{const c=JSON.parse(localStorage.getItem("taskBoard_ai_config")||"{}");return{provider:c.provider||"zhipu",apiKey:"",model:c.model||"glm-4-flash",baseUrl:c.baseUrl||"https://open.bigmodel.cn/api/paas/v4"}})(),
+    fieldMeta:SYNC_META,
     updatedAt:new Date().toISOString(),
     updatedBy:localStorage.getItem("taskBoard_user")||"guest"
   };
+}
+/* ---- 字段级云同步合并：按字段时间戳逐字段比较，防止旧设备整行覆盖本地新增 ---- */
+/* ★修复"添加人员/小组没反应"：云端旧数据（无 fieldMeta 时间戳）遇到本地已有数据时保留本地 */
+function mergeCloudPayload(data){
+  if(!data)return false;
+  const cloudMeta=data.fieldMeta||{};
+  let changed=false;
+  const merges=[];
+  function mergeField(field,cloudVal,isArr,setter,localHasData){
+    const cloudT=(cloudMeta[field+"_t"]||"").toString();
+    const localT=SYNC_META[field+"_t"]||"";
+    const cloudValid=cloudVal!==undefined&&cloudVal!==null&&(isArr?(Array.isArray(cloudVal)&&cloudVal.length>0):(typeof cloudVal==="object"&&!Array.isArray(cloudVal)));
+    const cloudIsNewer=cloudT?(!localT||cloudT>localT):!localHasData;
+    if(cloudValid&&cloudIsNewer){
+      setter(cloudVal);
+      changed=true;
+      merges.push(field);
+    }
+  }
+  mergeField("tasks",data.tasks,true,v=>{TASKS=v},TASKS.length>0);
+  mergeField("library",data.library,true,v=>{LIBRARY=v},LIBRARY.length>0);
+  mergeField("publish",data.publish,true,v=>{PUBLISH=v},PUBLISH.length>0);
+  mergeField("videolinks",data.videolinks,true,v=>{VIDEOLINKS=v},VIDEOLINKS.length>0);
+  mergeField("accounts",data.accounts,true,v=>{ACCOUNTS=v},ACCOUNTS.length>0);
+  mergeField("benchmarks",data.benchmarks,true,v=>{BENCHMARKS=v},BENCHMARKS.length>0);
+  mergeField("persons",data.persons,true,v=>{PERSONS=v},PERSONS.length>0);
+  mergeField("orgTree",data.orgTree,true,v=>{ORG_TREE=v},ORG_TREE.length>0);
+  mergeField("qbank",data.qbank,true,v=>{QBANK=v;localStorage.setItem(K_QBANK,JSON.stringify(QBANK))},QBANK.length>0);
+  mergeField("kbank",data.kbank,true,v=>{KBANK=v;localStorage.setItem(K_KBANK,JSON.stringify(KBANK))},KBANK.length>0);
+  mergeField("hidden",data.hidden,false,v=>{HIDDEN=v},Object.keys(HIDDEN).length>0);
+  mergeField("personColumns",data.personColumns,false,v=>{PERSON_COLUMNS=v;localStorage.setItem(K_COLUMNS,JSON.stringify(v))},Object.keys(PERSON_COLUMNS).length>0);
+  mergeField("notifySettings",data.notifySettings,false,v=>{NOTIFY_SETTINGS=v;localStorage.setItem(K_NOTIFY,JSON.stringify(v))},Object.keys(NOTIFY_SETTINGS).length>0);
+  mergeField("schedData",data.schedData,false,v=>{SCHED_DATA=v;localStorage.setItem(K_SCHED,JSON.stringify(v))},Object.keys(SCHED_DATA).length>0);
+  // 三个排班 webhook 地址彼此独立：本地已填优先保留，仅本地为空时采用云端 webhook
+  function mergeSchedNotifyField(key,storageKey,getCur,setCur){
+    const cv=data[key];
+    if(cv&&typeof cv==="object"&&!Array.isArray(cv)&&Object.keys(cv).length>0){
+      const cloudT=(cloudMeta[key+"_t"]||"").toString();
+      const localT=SYNC_META[key+"_t"]||"";
+      const cur=getCur();
+      const localHasData=cur&&Object.keys(cur).length>0;
+      const cloudIsNewer=cloudT?(!localT||cloudT>localT):!localHasData;
+      if(cloudIsNewer){
+        const curWebhook=cur?(cur.webhook||"").trim():"";
+        let merged=Object.assign({},cv);
+        if(curWebhook)merged.webhook=curWebhook;
+        setCur(merged);
+        localStorage.setItem(storageKey,JSON.stringify(merged));
+        changed=true;merges.push(key);
+      }
+    }
+  }
+  mergeSchedNotifyField("schedNotify",K_SCHED_NOTIFY,()=>SCHED_NOTIFY,v=>{SCHED_NOTIFY=v});
+  mergeSchedNotifyField("schedAnchorNotify",K_SCHED_ANCHOR_NOTIFY,()=>SCHED_ANCHOR_NOTIFY,v=>{SCHED_ANCHOR_NOTIFY=v});
+  mergeSchedNotifyField("schedServiceNotify",K_SCHED_SERVICE_NOTIFY,()=>SCHED_SERVICE_NOTIFY,v=>{SCHED_SERVICE_NOTIFY=v});
+  mergeField("schedAnchor",data.schedAnchor,false,v=>{SCHED_ANCHOR=v;localStorage.setItem(K_SCHED_ANCHOR,JSON.stringify(v))},Object.keys(SCHED_ANCHOR).length>0);
+  mergeField("schedService",data.schedService,false,v=>{SCHED_SERVICE=v;localStorage.setItem(K_SCHED_SERVICE,JSON.stringify(v))},Object.keys(SCHED_SERVICE).length>0);
+  // webhookProxy：Netlify 自动检测优先；云端非假地址且本地无自动检测时采用
+  if(typeof data.webhookProxy==="string"){
+    var cloudProxy=(data.webhookProxy||"").trim();
+    var autoProxy=autoDetectProxyUrl();
+    var isFake=/example\.com|test\.|localhost|127\.0\.0\.1/.test(cloudProxy);
+    if(cloudProxy&&!isFake&&!autoProxy){
+      const cloudT=(cloudMeta.webhookProxy_t||"").toString();
+      const localT=SYNC_META.webhookProxy_t||"";
+      const cloudIsNewer=!cloudT||!localT||cloudT>localT;
+      if(cloudIsNewer){WEBHOOK_PROXY_URL=cloudProxy;localStorage.setItem(K_PROXY,WEBHOOK_PROXY_URL);changed=true;merges.push("webhookProxy")}
+    }
+  }
+  // aiConfig：仅同步 provider/model/baseUrl，密钥各设备独立；本地无 apiKey 时采用云端配置
+  if(data.aiConfig&&typeof data.aiConfig==="object"){
+    const cur=JSON.parse(localStorage.getItem("taskBoard_ai_config")||"{}");
+    if(!cur||!cur.apiKey){
+      const merged={provider:data.aiConfig.provider||cur.provider||"zhipu",apiKey:"",model:data.aiConfig.model||cur.model||"glm-4-flash",baseUrl:data.aiConfig.baseUrl||cur.baseUrl||"https://open.bigmodel.cn/api/paas/v4"};
+      localStorage.setItem("taskBoard_ai_config",JSON.stringify(merged));loadAIConfig();updateAIStatusDot();changed=true;
+    }
+  }
+  if(changed){
+    merges.forEach(f=>{SYNC_META[f+"_t"]=(cloudMeta[f+"_t"])||new Date().toISOString()});
+    saveSyncMeta();
+    window.__sbApplyingCloud=true;
+    try{migratePersonId();syncColumnsToPerson();saveAll();renderAll();try{localStorage.removeItem("taskBoard_localDirty")}catch(e){}}
+    finally{window.__sbApplyingCloud=false}
+  }
+  return changed;
 }
 /* ---- 实时同步（秒级） ---- */
 let sbRealtimeChannel=null;      // 当前实时订阅频道
@@ -9981,7 +10139,7 @@ function setupRealtime(){
         var cloudTime2=new Date(cloud.updatedAt||payload.new.updated_at||0).getTime();
         var localLast=localStorage.getItem("taskBoard_lastSync")?new Date(localStorage.getItem("taskBoard_lastSync")).getTime():0;
         if(cloudTime2>localLast||(!isSelf&&dirtyTime<=cloudTime2)){
-          applyCloudPayload(cloud);
+          mergeCloudPayload(cloud);
           localStorage.setItem("taskBoard_lastSync",new Date().toISOString());
           updateSyncBadge("on","☁️ 已同步");
         }
@@ -10066,6 +10224,15 @@ async function pushCloudData(){
   sbSyncing=true;
   updateSyncBadge("spin","同步中…");
   try{
+    // ★推送前先拉一次云端做字段级合并：防止本机旧字段覆盖其他设备刚更新的内容
+    try{
+      const pre=await sbClient.from("taskboard_data").select("data").limit(1);
+      if(pre&&pre.data&&pre.data.length>0&&pre.data[0].data){
+        const remote=pre.data[0].data;
+        const remoteMeta=remote.fieldMeta||{};
+        for(const k in remoteMeta){if(!SYNC_META[k]||remoteMeta[k]>SYNC_META[k]){mergeCloudPayload(remote);break}}
+      }
+    }catch(e){/*预拉失败不影响推送*/}
     const payload=buildCloudPayload();
     const {data,error}=await sbClient.from("taskboard_data").update({data:payload,updated_at:new Date().toISOString(),updated_by:payload.updatedBy}).eq("id","main").select();
     if(error){
@@ -10120,7 +10287,7 @@ async function pullCloudData(silent){
           scheduleSyncPush();
           return;
         }
-        applyCloudPayload(cloud);
+        mergeCloudPayload(cloud);
         localStorage.setItem("taskBoard_lastSync",new Date().toISOString());
       }
     }
