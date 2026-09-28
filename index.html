@@ -2912,6 +2912,7 @@ function init(){
   initOCR();
   initDocUpload();
   initStoryboard();
+  initKbFileDB();
   initEgg();
   initImportFile();
   // 手机端 header 高度动态适配（fixed header + CSS 变量）
@@ -5388,6 +5389,220 @@ function delQBankItem(id){
   toast("已删除");
 }
 
+/* ---- 知识库 IndexedDB 文件存储 + 文档预览渲染 ---- */
+let kbFileDB=null;
+function initKbFileDB(){
+  return new Promise(function(resolve,reject){
+    try{
+      var req=indexedDB.open("taskboard_files",1);
+      req.onupgradeneeded=function(e){
+        var db=e.target.result;
+        if(!db.objectStoreNames.contains("files"))db.createObjectStore("files",{keyPath:"id"});
+      };
+      req.onsuccess=function(e){kbFileDB=e.target.result;resolve(kbFileDB)};
+      req.onerror=function(e){console.warn("IndexedDB init failed:",e);resolve(null)};
+    }catch(e){console.warn("IndexedDB not available:",e);resolve(null)}
+  });
+}
+function kbSaveFile(id,blob){
+  return new Promise(function(resolve,reject){
+    if(!kbFileDB){resolve(false);return}
+    try{
+      var tx=kbFileDB.transaction(["files"],"readwrite");
+      tx.objectStore("files").put({id:id,blob:blob});
+      tx.oncomplete=function(){resolve(true)};
+      tx.onerror=function(){resolve(false)};
+    }catch(e){resolve(false)}
+  });
+}
+function kbGetFile(id){
+  return new Promise(function(resolve,reject){
+    if(!kbFileDB){resolve(null);return}
+    try{
+      var tx=kbFileDB.transaction(["files"],"readonly");
+      var req=tx.objectStore("files").get(id);
+      req.onsuccess=function(){resolve(req.result?req.result.blob:null)};
+      req.onerror=function(){resolve(null)};
+    }catch(e){resolve(null)}
+  });
+}
+function kbDeleteFile(id){
+  return new Promise(function(resolve){
+    if(!kbFileDB){resolve();return}
+    try{
+      var tx=kbFileDB.transaction(["files"],"readwrite");
+      tx.objectStore("files").delete(id);
+      tx.oncomplete=function(){resolve()};
+      tx.onerror=function(){resolve()};
+    }catch(e){resolve()}
+  });
+}
+// 文件类型图标
+function kbFileIcon(fileType){
+  var ft=(fileType||"").toLowerCase();
+  if(/ppt|pptx/.test(ft))return"📽️";
+  if(/xls|xlsx/.test(ft))return"📊";
+  if(/doc|docx/.test(ft))return"📝";
+  if(/pdf/.test(ft))return"📄";
+  if(/txt|md|markdown|csv/.test(ft))return"📃";
+  return"📎";
+}
+// 渲染 PDF
+async function kbRenderPDF(blob,container){
+  if(typeof pdfjsLib==="undefined"){container.innerHTML='<div style="padding:20px;color:#999">PDF 引擎未加载，请检查网络后刷新</div>';return}
+  try{
+    var buf=await blob.arrayBuffer();
+    var pdf=await pdfjsLib.getDocument({data:buf}).promise;
+    container.innerHTML='<div style="margin-bottom:8px;font-size:12px;color:var(--ink-faint)">共 '+pdf.numPages+' 页</div>';
+    for(var i=1;i<=pdf.numPages;i++){
+      var page=await pdf.getPage(i);
+      var canvas=document.createElement("canvas");
+      var viewport=page.getViewport({scale:1.2});
+      canvas.width=viewport.width;canvas.height=viewport.height;
+      canvas.style.cssText="max-width:100%;border:1px solid #eee;margin-bottom:8px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.06)";
+      await page.render({canvasContext:canvas.getContext("2d"),viewport:viewport}).promise;
+      container.appendChild(canvas);
+    }
+  }catch(e){container.innerHTML='<div style="padding:20px;color:#ef4444">PDF 渲染失败: '+esc(e.message)+'</div>'}
+}
+// 渲染 Excel
+function kbRenderExcel(blob,container){
+  if(typeof XLSX==="undefined"){container.innerHTML='<div style="padding:20px;color:#999">Excel 引擎未加载</div>';return}
+  var reader=new FileReader();
+  reader.onload=function(e){
+    try{
+      var wb=XLSX.read(e.target.result,{type:"array"});
+      var html="";
+      wb.SheetNames.forEach(function(sn){
+        var ws=wb.Sheets[sn];
+        var sheetHtml=XLSX.utils.sheet_to_html(ws,{editable:false});
+        html+='<div style="margin-bottom:16px"><div style="font-size:14px;font-weight:700;margin-bottom:6px;color:var(--ink)">'+esc(sn)+'</div>'+
+          '<div style="overflow:auto;max-height:500px;border:1px solid #eee;border-radius:8px">'+
+          '<table style="border-collapse:collapse;font-size:12px;width:100%">'+sheetHtml.replace(/<table/,'<table').replace(/border="0"/g,'')+'</table></div></div>';
+      });
+      // 给表格加样式
+      var div=document.createElement("div");
+      div.innerHTML=html;
+      div.querySelectorAll("td,th").forEach(function(c){c.style.cssText="border:1px solid #ddd;padding:4px 8px"});
+      div.querySelectorAll("th").forEach(function(c){c.style.background="#f6f2ea";c.style.fontWeight="700"});
+      container.innerHTML="";
+      container.appendChild(div);
+    }catch(e){container.innerHTML='<div style="padding:20px;color:#ef4444">Excel 渲染失败</div>'}
+  };
+  reader.readAsArrayBuffer(blob);
+}
+// 渲染 PPT
+async function kbRenderPPT(blob,container){
+  if(typeof JSZip==="undefined"){container.innerHTML='<div style="padding:20px;color:#999">PPT 引擎未加载</div>';return}
+  try{
+    var buf=await blob.arrayBuffer();
+    var zip=await JSZip.loadAsync(buf);
+    var slideFiles=Object.keys(zip.files).filter(function(f){return f.match(/ppt\/slides\/slide\d+\.xml/)}).sort(function(a,b){
+      return parseInt(a.match(/slide(\d+)/)[1])-parseInt(b.match(/slide(\d+)/)[1]);
+    });
+    container.innerHTML='<div style="margin-bottom:8px;font-size:12px;color:var(--ink-faint)">共 '+slideFiles.length+' 张幻灯片</div>';
+    for(var si=0;si<slideFiles.length;si++){
+      var sf=slideFiles[si];
+      var content=await zip.file(sf).async("string");
+      var textMatches=content.match(/<a:t>([^<]*)<\/a:t>/g);
+      var slideDiv=document.createElement("div");
+      slideDiv.style.cssText="background:#fff;border:1.5px solid #eee;border-radius:12px;padding:16px;margin-bottom:10px;min-height:60px";
+      var slideNum=si+1;
+      var html='<div style="font-size:11px;color:#999;margin-bottom:6px">第 '+slideNum+' 页</div>';
+      if(textMatches){
+        var texts=textMatches.map(function(m){return m.replace(/<[^>]+>/g,"")}).filter(Boolean);
+        html+=texts.map(function(t){return '<div style="margin:4px 0;font-size:14px;line-height:1.6">'+esc(t)+'</div>'}).join("");
+      }else{
+        html+='<div style="color:#ccc;font-size:13px">（本页无文字内容）</div>';
+      }
+      // 提取图片
+      var imgRels=content.match(/r:embed="rId(\d+)"/g);
+      if(imgRels){
+        // 尝试获取关系文件
+        var slideRelsPath=sf.replace("ppt/slides/","ppt/slides/_rels/")+".rels";
+        if(zip.files[slideRelsPath]){
+          var relsContent=await zip.file(slideRelsPath).async("string");
+          imgRels.forEach(function(imgRef){
+            var rid=imgRef.match(/rId(\d+)/)[1];
+            var relMatch=relsContent.match(new RegExp('Id="rId'+rid+'"[^>]*Target="([^"]*)"'));
+            if(relMatch){
+              var imgPath="ppt/slides/"+relMatch[1].replace(/\.\.\//g,"");
+              imgPath=imgPath.replace(/ppt\/slides\/media/g,"ppt/media");
+              var mediaPath=imgPath.replace(/^.*?ppt\//,"ppt/");
+              if(zip.files[mediaPath]){
+                var imgBlob=zip.file(mediaPath).async("blob");
+                imgBlob.then(function(b){
+                  var url=URL.createObjectURL(b);
+                  var img=document.createElement("img");
+                  img.src=url;img.style.cssText="max-width:90%;border-radius:8px;margin:6px 0";
+                  slideDiv.appendChild(img);
+                });
+              }
+            }
+          });
+        }
+      }
+      slideDiv.innerHTML=html;
+      container.appendChild(slideDiv);
+    }
+  }catch(e){container.innerHTML='<div style="padding:20px;color:#ef4444">PPT 渲染失败: '+esc(e.message)+'</div>'}
+}
+// 渲染 Word
+function kbRenderWord(blob,container){
+  if(typeof mammoth==="undefined"){container.innerHTML='<div style="padding:20px;color:#999">Word 引擎未加载</div>';return}
+  var reader=new FileReader();
+  reader.onload=function(e){
+    mammoth.convertToHtml({arrayBuffer:e.target.result}).then(function(res){
+      var div=document.createElement("div");
+      div.className="kb-word-preview";
+      div.innerHTML=res.value||'<div style="color:#999">文档无内容</div>';
+      // 基本排版样式
+      div.querySelectorAll("p,div").forEach(function(p){p.style.cssText="margin:8px 0;line-height:1.8;font-size:14px"});
+      div.querySelectorAll("h1,h2,h3,h4").forEach(function(h){h.style.cssText="margin:16px 0 8px;font-weight:700"});
+      div.querySelectorAll("table").forEach(function(t){t.style.cssText="border-collapse:collapse;width:100%";t.querySelectorAll("td,th").forEach(function(c){c.style.cssText="border:1px solid #ddd;padding:6px"})});
+      div.querySelectorAll("img").forEach(function(img){img.style.cssText="max-width:100%;border-radius:8px;margin:8px 0"});
+      container.innerHTML="";
+      container.appendChild(div);
+    }).catch(function(){
+      // 降级：提取纯文本
+      var r2=new FileReader();
+      r2.onload=function(ev){
+        mammoth.extractRawText({arrayBuffer:ev.target.result}).then(function(res2){
+          container.innerHTML='<pre style="white-space:pre-wrap;font-size:14px;line-height:1.8;padding:8px">'+esc(res2.value||"")+'</pre>';
+        }).catch(function(){container.innerHTML='<div style="padding:20px;color:#ef4444">Word 渲染失败</div>'});
+      };
+      r2.readAsArrayBuffer(blob);
+    });
+  };
+  reader.readAsArrayBuffer(blob);
+}
+// 通用渲染入口
+async function kbRenderFile(kbItem,container){
+  if(!kbItem.hasFile){container.innerHTML='<div class="kb-detail-content">'+esc(kbItem.content||"（无内容）").replace(/\n/g,"<br>")+'</div>';return}
+  var blob=await kbGetFile(kbItem.id);
+  if(!blob){
+    // 文件不在本设备（IndexedDB 不跟随云同步），显示提取的文字摘要
+    container.innerHTML='<div style="padding:12px;background:#fff8e9;border:1px solid #ffe2a7;border-radius:10px;margin-bottom:12px;font-size:13px;color:#b45309">⚠️ 原始文件仅存储在当初上传的设备上，当前设备无法预览。以下是文字摘要：</div>'+
+      '<div class="kb-detail-content">'+esc(kbItem.content||"（无内容）").replace(/\n/g,"<br>")+'</div>';
+    return;
+  }
+  var ft=(kbItem.fileType||"").toLowerCase();
+  container.innerHTML='<div style="padding:8px 0;font-size:13px;color:var(--ink-faint)">📁 '+esc(kbItem.fileName||"")+' · '+(kbItem.fileSize?Math.round(kbItem.fileSize/1024)+'KB':'')+'</div>';
+  var loading=document.createElement("div");
+  loading.style.cssText="padding:20px;color:#999;text-align:center";
+  loading.textContent="正在加载文档预览…";
+  container.appendChild(loading);
+  try{
+    if(/pdf/.test(ft)){await kbRenderPDF(blob,container)}
+    else if(/xls|xlsx/.test(ft)){kbRenderExcel(blob,container)}
+    else if(/ppt|pptx/.test(ft)){await kbRenderPPT(blob,container)}
+    else if(/doc|docx/.test(ft)){kbRenderWord(blob,container)}
+    else{container.innerHTML='<pre style="white-space:pre-wrap;font-size:14px;line-height:1.8;padding:8px">'+esc(kbItem.content||"")+'</pre>'}
+  }catch(e){
+    loading.textContent="渲染失败: "+e.message;
+  }
+}
+
 /* ---- 知识库 ---- */
 function renderKBankView(){
   loadKBank();
@@ -5421,14 +5636,18 @@ function renderKBankView(){
       var card=document.createElement("div");
       card.className="kb-card";
       var tagsHtml=(k.tags||"").split(/[,，\s]+/).filter(Boolean).map(function(t){return '<span class="kb-tag">'+esc(t)+'</span>'}).join("");
+      var icon=k.hasFile?kbFileIcon(k.fileType):"📖";
+      var fileBadge=k.hasFile?'<span style="font-size:11px;background:#e9f6fe;color:#0ea5e9;padding:1px 6px;border-radius:4px;margin-right:4px;font-weight:600">'+esc(k.fileType||"")+'</span>':'';
       var preview=(k.content||"").slice(0,120);
       card.innerHTML='<div class="kb-card-head">'+
-        '<span class="kb-card-cat">'+esc(k.category||"未分类")+'</span>'+
+        '<span style="font-size:18px;margin-right:4px">'+icon+'</span>'+
+        '<span class="kb-card-cat">'+fileBadge+esc(k.category||"未分类")+'</span>'+
         '<span class="kb-card-title">'+esc(k.title||"")+'</span>'+
         '<span class="kb-card-actions">'+
           '<button class="kb-act-btn" onclick="editKBankItem(\''+k.id+'\')">✏️</button>'+
           '<button class="kb-act-btn del" onclick="delKBankItem(\''+k.id+'\')">🗑</button>'+
         '</span></div>'+
+        (k.hasFile?'<div style="font-size:11px;color:var(--ink-faint);margin-top:3px">📎 '+esc(k.fileName||"")+(k.fileSize?' · '+Math.round(k.fileSize/1024)+'KB':'')+'</div>':'')+
         (preview?'<div class="kb-card-preview">'+esc(preview)+(k.content.length>120?'...':'')+'</div>':'')+
         (tagsHtml?'<div class="kb-card-tags">'+tagsHtml+'</div>':'')+
         '<div class="kb-card-date">'+esc(k.updated||k.created||"")+'</div>';
@@ -5491,6 +5710,7 @@ function saveKBankItem(){
 }
 function delKBankItem(id){
   if(!confirm("确认删除这条知识？"))return;
+  kbDeleteFile(id);
   KBANK=KBANK.filter(function(x){return x.id!==id});
   saveKBank();
   renderKBankView();
@@ -5501,7 +5721,7 @@ function kbOpenUpload(){
   overlay.className="kb-overlay";
   overlay.innerHTML='<div class="kb-modal kb-modal-lg">'+
     '<div class="kb-modal-title">📤 上传文档到知识库<button class="kb-modal-close" onclick="this.closest(\'.kb-overlay\').remove()">✕</button></div>'+
-    '<div class="kb-upload-status" id="kbUpStatus">选择文档后自动识别内容，生成知识条目</div>'+
+    '<div class="kb-upload-status" id="kbUpStatus">支持 PPT、Excel、Word、PDF — 存储原始文件，点开即可预览</div>'+
     '<div id="kbUpProgress" style="display:none"><div class="kb-upload-progress"><div class="kb-upload-bar" id="kbUpBar"></div></div></div>'+
     '<input type="file" id="kbUpFile" multiple accept=".txt,.md,.markdown,.csv,.docx,.pdf,.xlsx,.xls,.pptx" style="display:none">'+
     '<div id="kbUpPreview" class="kb-upload-preview" style="display:none"></div>'+
@@ -5520,7 +5740,6 @@ function kbHandleFiles(files){
   var status=document.getElementById("kbUpStatus");
   var prog=document.getElementById("kbUpProgress");
   var bar=document.getElementById("kbUpBar");
-  var preview=document.getElementById("kbUpPreview");
   var total=files.length;
   var done=0;
   var results=[];
@@ -5528,20 +5747,22 @@ function kbHandleFiles(files){
   prog.style.display="block";
   bar.style.width="0%";
   Array.from(files).forEach(function(file,idx){
+    var ext=file.name.split(".").pop().toLowerCase();
+    var fileInfo={file:file.name.replace(/\.[^.]+$/,""),title:file.name.replace(/\.[^.]+$/,""),text:"",blob:file,fileType:ext,fileName:file.name,fileSize:file.size};
+    // 提取文字摘要（用于搜索和文字预览降级）
     processDocFile(file).then(function(text){
-      var chunks=kbSplitText(text);
-      chunks.forEach(function(ch){
-        results.push({file:file.name.replace(/\.[^.]+$/,""),title:ch.title,text:ch.text});
-      });
+      fileInfo.text=text;
       done++;
       bar.style.width=Math.round(done/total*100)+"%";
-      status.textContent="已处理 "+(idx+1)+"/"+total+"："+file.name+"，识别出 "+chunks.length+" 条知识";
-      if(done===total)kbShowResults(results,total);
+      status.textContent="已处理 "+(idx+1)+"/"+total+"："+file.name+"（"+Math.round(file.size/1024)+"KB）";
+      results.push(fileInfo);
+      if(done===total)kbShowResults(results);
     }).catch(function(err){
       done++;
       bar.style.width=Math.round(done/total*100)+"%";
-      results.push({file:file.name.replace(/\.[^.]+$/,""),title:"",text:"",error:err.message||"解析失败"});
-      if(done===total)kbShowResults(results,total);
+      fileInfo.error=err.message||"解析失败";
+      results.push(fileInfo);
+      if(done===total)kbShowResults(results);
     });
   });
 }
@@ -5591,50 +5812,62 @@ function kbShowResults(results){
   var okCount=results.length-failCount;
   prog.style.display="none";
   if(okCount===0){
-    status.textContent="未识别到可用的知识内容"+(failCount?"（"+failCount+" 个文件解析失败）":"");
+    status.textContent="未识别到可用的文档"+(failCount?"（"+failCount+" 个文件解析失败）":"");
     return;
   }
-  status.textContent="识别完成，共 "+okCount+" 条知识"+(failCount?"，"+failCount+" 个文件解析失败":"");
+  status.textContent="已处理 "+okCount+" 个文档"+(failCount?"，"+failCount+" 个解析失败":"")+"，确认导入即可存储原始文件并预览";
   preview.style.display="";
   var html="";
   results.forEach(function(r,i){
+    var icon=kbFileIcon(r.fileType);
+    var sizeStr=r.fileSize?Math.round(r.fileSize/1024)+"KB":"";
     html+='<div class="kb-import-card">'+
-      '<div class="kb-import-head"><span class="kb-import-name">'+esc(r.title||"(无标题)")+'</span>'+
-      (r.error?'':('<label style="font-size:12px;color:#10b981;font-weight:700;cursor:pointer;user-select:none"><input type="checkbox" data-kb="'+i+'" checked style="vertical-align:-2px;margin-right:3px" onchange="kbToggleSel('+i+')">导入</label>'))+'</div>'+
-      (r.error?'<div style="font-size:12px;color:#ef4444;margin-top:6px">'+esc(r.error)+'</div>':
-        '<div style="font-size:12px;color:var(--ink-faint);margin-top:4px">'+esc(r.file)+' · '+r.text.length+' 字</div>'+
-        '<div style="font-size:12px;color:var(--ink-soft);margin-top:6px;line-height:1.6;max-height:60px;overflow:hidden">'+esc(r.text.slice(0,140))+(r.text.length>140?"...":"")+'</div>')+
+      '<div class="kb-import-head"><span style="font-size:20px;margin-right:6px">'+icon+'</span><span class="kb-import-name">'+esc(r.fileName||r.title||"(未知文件)")+'</span>'+
+      (r.error?'<span style="font-size:12px;color:#ef4444;margin-left:8px">'+esc(r.error)+'</span>':
+        '<label style="font-size:12px;color:#10b981;font-weight:700;cursor:pointer;user-select:none"><input type="checkbox" data-kb="'+i+'" checked style="vertical-align:-2px;margin-right:3px" onchange="kbToggleSel('+i+')">导入</label>')+'</div>'+
+      (r.error?'':
+        '<div style="font-size:12px;color:var(--ink-faint);margin-top:4px">'+esc(r.fileType||"")+' · '+sizeStr+(r.text?' · '+r.text.length+' 字摘要':'')+'</div>'+
+        (r.text?'<div style="font-size:12px;color:var(--ink-soft);margin-top:6px;line-height:1.6;max-height:60px;overflow:hidden">'+esc(r.text.slice(0,140))+(r.text.length>140?"...":"")+'</div>':''))+
       '</div>';
   });
   preview.innerHTML=html;
-  var okCount=results.filter(function(r){return !r.error}).length;
-  if(okCount>0){
+  var okCount2=results.filter(function(r){return !r.error}).length;
+  if(okCount2>0){
     var confirmBtn=document.createElement("button");
     confirmBtn.className="kb-modal-save";
-    confirmBtn.textContent="确认导入 "+okCount+" 条知识";
+    confirmBtn.textContent="确认导入 "+okCount2+" 个文档";
     confirmBtn.onclick=function(){kbImportAll(results)};
     var btns=preview.closest(".kb-modal").querySelector(".kb-modal-btns");
     btns.insertBefore(confirmBtn,btns.firstChild);
   }
 }
 function kbToggleSel(idx){
-  // onchange 已自动更新 checked 状态，此处仅用于扩展钩子
+  // onchange 已自动更新 checked 状态
 }
-function kbImportAll(results){
+async function kbImportAll(results){
   var sel=results.filter(function(r,i){
     if(r.error)return false;
     var cb=document.querySelector('#kbUpPreview input[data-kb="'+i+'"]');
     return !cb||cb.checked;
   });
-  if(sel.length===0){toast("未选择任何知识");return}
+  if(sel.length===0){toast("未选择任何文档");return}
   var now=new Date().toISOString().slice(0,16).replace("T"," ");
-  sel.forEach(function(r){
-    KBANK.push({id:uid(),title:r.title,category:"其他",content:r.text,tags:"",created:now,updated:now});
-  });
+  var imported=0;
+  for(var i=0;i<sel.length;i++){
+    var r=sel[i];
+    var kid=uid();
+    // 存文件 blob 到 IndexedDB
+    if(r.blob){
+      var saved=await kbSaveFile(kid,r.blob);
+      if(!saved){console.warn("文件存储失败:",r.fileName)}
+    }
+    KBANK.push({id:kid,title:r.fileName||r.title||"未命名文档",category:"其他",content:r.text||"",tags:"",created:now,updated:now,hasFile:!!r.blob,fileType:r.fileType||"",fileName:r.fileName||"",fileSize:r.fileSize||0});
+    imported++;
+  }
   saveKBank();
   var o=document.querySelector(".kb-overlay");if(o)o.remove();
   renderKBankView();
-  toast("已导入 "+sel.length+" 条知识");
+  toast("已导入 "+imported+" 个文档到知识库");
 }
 function showKBankDetail(id){
   var k=KBANK.find(function(x){return x.id===id});
@@ -5642,14 +5875,17 @@ function showKBankDetail(id){
   var overlay=document.createElement("div");
   overlay.className="kb-overlay";
   var tagsHtml=(k.tags||"").split(/[,，\s]+/).filter(Boolean).map(function(t){return '<span class="kb-tag">'+esc(t)+'</span>'}).join("");
+  var icon=k.hasFile?kbFileIcon(k.fileType):"📖";
   overlay.innerHTML='<div class="kb-modal kb-modal-lg">'+
-    '<div class="kb-modal-title">'+esc(k.title||"")+'<button class="kb-modal-close" onclick="this.closest(\'.kb-overlay\').remove()">✕</button></div>'+
-    '<div class="kb-detail-cat">'+esc(k.category||"未分类")+'</div>'+
-    '<div class="kb-detail-content">'+esc(k.content||"（无内容）").replace(/\n/g,"<br>")+'</div>'+
+    '<div class="kb-modal-title">'+icon+' '+esc(k.title||"")+'<button class="kb-modal-close" onclick="this.closest(\'.kb-overlay\').remove()">✕</button></div>'+
+    '<div class="kb-detail-cat">'+esc(k.category||"未分类")+(k.hasFile?' · '+esc(k.fileType||"")+(k.fileSize?' · '+Math.round(k.fileSize/1024)+'KB':''):'')+'</div>'+
+    '<div id="kbDocPreview" class="kb-doc-preview" style="margin-top:12px;max-height:70vh;overflow:auto;padding:4px"></div>'+
     (tagsHtml?'<div class="kb-card-tags" style="margin-top:12px">'+tagsHtml+'</div>':'')+
     '<div class="kb-card-date" style="margin-top:8px">'+esc(k.updated||k.created||"")+'</div>';
   overlay.onclick=function(e){if(e.target===overlay)overlay.remove()};
   document.body.appendChild(overlay);
+  // 渲染文档预览
+  kbRenderFile(k,document.getElementById("kbDocPreview"));
 }
 function saveSched2Notify(type){
   var conf=sched2Conf(type);
