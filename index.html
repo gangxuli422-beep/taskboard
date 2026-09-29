@@ -822,7 +822,7 @@
     /* 汇总标题 sticky 偏移适配手机 header 高度 */
     .board.summary-mode > div:first-child{top:var(--header-h,52px)!important}
     /* 手机端抽屉不被 header 遮挡，且内容从 header 下方开始 */
-    .ps-sidebar{top:var(--header-h,52px)!important;padding-top:6px}
+    .ps-sidebar{top:var(--header-h,52px)!important;padding-top:6px;height:calc(100dvh - var(--header-h,52px))!important;bottom:auto!important}
     .ps-sidebar-toggle{top:6px;z-index:120}
     .ai-fab{bottom:34px!important;z-index:60}
     /* ===== 手机竖屏排版优化 ===== */
@@ -844,6 +844,8 @@
     .task-card{padding:13px 14px}
     .task-title{font-size:13.5px}
     .card-actions{opacity:1}
+    .bench-card .bc-actions{opacity:1}
+    .tree-actions{opacity:1}
     .mini-btn{padding:7px 9px;font-size:12px}
     .complete-btn{padding:7px 11px;font-size:11.5px}
     /* 顶部工具栏换行 */
@@ -973,12 +975,12 @@
   .ps-sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:104;opacity:0;transition:opacity .25s ease;-webkit-tap-highlight-color:transparent}
   .ps-sidebar-overlay.show{display:block;opacity:1}
   @media(max-width:768px){
-    .ps-sidebar{transform:translateX(-100%);width:240px;z-index:110;height:100vh;height:100dvh}
+    .ps-sidebar{transform:translateX(-100%);width:240px;z-index:110;height:100dvh}
     .ps-sidebar.open{transform:translateX(0)}
     .ps-sidebar-toggle{display:flex}
     body.with-sidebar{padding-left:0}
     /* 平板/窄窗口：抽屉与标题 sticky 同步使用实测 header 高度变量 */
-    .ps-sidebar{top:var(--header-h,52px)!important}
+    .ps-sidebar{top:var(--header-h,52px)!important;height:calc(100dvh - var(--header-h,52px))!important;bottom:auto!important}
     .board.summary-mode > div:first-child{top:var(--header-h,52px)!important}
     .ps-sidebar .ps-side-items{padding:0 6px}
     .tree-node{padding:8px 8px;font-size:14px}
@@ -986,6 +988,10 @@
     .tree-label{font-size:14px}
     .ps-side-all{padding:10px 10px;font-size:14px}
     .ps-side-all .ps-all-icon{width:32px;height:32px;font-size:16px}
+    /* ★修复：触屏设备无 hover，操作按钮需常显（此处位于基础规则之后才能覆盖 opacity:0） */
+    .tree-actions{opacity:1}
+    .bench-card .bc-actions{opacity:1}
+    .card-actions{opacity:1}
   }
   @media(max-width:380px){
     .ps-sidebar{width:200px}
@@ -2266,6 +2272,7 @@ function saveAll(skipFieldTouch){
   localStorage.setItem(K_ACC,JSON.stringify(ACCOUNTS));
   localStorage.setItem(K_HIDDEN,JSON.stringify(HIDDEN));
   localStorage.setItem(K_ORGTREE,JSON.stringify(ORG_TREE));
+  localStorage.setItem(K_PERSONS,JSON.stringify(PERSONS));
   localStorage.setItem(K_COLUMNS,JSON.stringify(PERSON_COLUMNS));
   localStorage.setItem(K_NOTIFY,JSON.stringify(NOTIFY_SETTINGS));
   localStorage.setItem(K_SCHED,JSON.stringify(SCHED_DATA));
@@ -2390,7 +2397,10 @@ function getDefaultNotifySettings(){
 }
 function saveNotifySettings(pid,settings){
   const id=pid||activePersonId;
-  if(!id)return;
+  if(!id){
+    // ★修复：汇总视图下用 __shared__ 键保存，不静默丢弃（原来保存后重开全部消失却提示成功）
+    id="__shared__";
+  }
   NOTIFY_SETTINGS[id]=settings;
   localStorage.setItem(K_NOTIFY,JSON.stringify(NOTIFY_SETTINGS));
   touchField("notifySettings");
@@ -2439,7 +2449,12 @@ function loadAll(){
   try{HIDDEN=JSON.parse(localStorage.getItem(K_HIDDEN)||"{}")}catch(e){HIDDEN={}}
   if(!HIDDEN||typeof HIDDEN!=="object"||Array.isArray(HIDDEN))HIDDEN={};
   try{ACCOUNTS=JSON.parse(localStorage.getItem(K_ACC)||"null")}catch(e){ACCOUNTS=null}
-  if(!ACCOUNTS||!Array.isArray(ACCOUNTS)||ACCOUNTS.length===0){ACCOUNTS=JSON.parse(JSON.stringify(DEFAULT_ACCOUNTS))}
+  // ★修复：空数组是用户主动删除的结果，不再复活 DEFAULT_ACCOUNTS（与 persons 初始化标记方案一致）
+  if(!ACCOUNTS||!Array.isArray(ACCOUNTS)){ACCOUNTS=JSON.parse(JSON.stringify(DEFAULT_ACCOUNTS))}
+  else if(ACCOUNTS.length===0&&!localStorage.getItem("taskBoard_acc_initialized")){
+    ACCOUNTS=JSON.parse(JSON.stringify(DEFAULT_ACCOUNTS));
+  }
+  localStorage.setItem("taskBoard_acc_initialized","1");
   try{PERSONS=JSON.parse(localStorage.getItem(K_PERSONS)||"[]")}catch(e){PERSONS=[]}
   if(!Array.isArray(PERSONS)||PERSONS.length===0){
     // 首次使用（无初始化标记）才填充默认人员，之后删空不再自动重置
@@ -6986,6 +7001,8 @@ function onColumnChange(){
   }
 }
 
+function onRepeatChange(){}
+
 function editTask(id){
   const t=TASKS.find(x=>x.id===id);
   if(!t)return;
@@ -7616,7 +7633,7 @@ function toggleComplete(id){
   if(!t)return;
   t.completed=!t.completed;
   if(t.completed){
-    t.doneTime=new Date().toISOString();
+    t.doneTime=nowInputVal(); // ★修复：用本地时间格式存储，与表单 saveTask 一致，避免编辑时漂移 8 小时
     t.doneDate=new Date().toISOString();
     // 重复任务：完成后自动生成下一周期任务
     var nextTask=generateRepeatTask(t);
@@ -7859,7 +7876,7 @@ function batchComplete(){
   let n=0;
   batchSelected.forEach(id=>{
     const t=TASKS.find(x=>x.id===id);
-    if(t&&!t.completed){t.completed=true;t.doneTime=new Date().toISOString();t.doneDate=new Date().toISOString();n++}
+    if(t&&!t.completed){t.completed=true;t.doneTime=nowInputVal();t.doneDate=new Date().toISOString();n++} // ★修复：本地时间格式，避免编辑时漂移
   });
   saveTasks();renderAll();
   batchSelected.clear();
@@ -10215,6 +10232,11 @@ function initSupabase(){
       }
       pullCloudData(true);
       setupRealtime(); // 无论是否登录都开启实时订阅（秒级同步）
+    }).catch(err=>{
+      // ★修复：getSession 失败时提示用户，不要假装已连接
+      updateSyncBadge("off","⚠️ 连接失败");
+      toast("云同步连接失败："+(err&&err.message||err));
+      console.error("getSession error:",err);
     });
     // 监听认证状态变化
     sbClient.auth.onAuthStateChange((event,session)=>{
@@ -10289,14 +10311,37 @@ function mergeCloudPayload(data){
   function mergeField(field,cloudVal,isArr,setter,localHasData){
     const cloudT=(cloudMeta[field+"_t"]||"").toString();
     const localT=SYNC_META[field+"_t"]||"";
-    const cloudValid=cloudVal!==undefined&&cloudVal!==null&&(isArr?(Array.isArray(cloudVal)&&cloudVal.length>0):(typeof cloudVal==="object"&&!Array.isArray(cloudVal)));
+    // ★修复：空数组是合法的（用户删光了所有数据），不应被视为无效，否则删除操作永远无法同步
+    const cloudValid=cloudVal!==undefined&&cloudVal!==null&&(isArr?Array.isArray(cloudVal):(typeof cloudVal==="object"&&!Array.isArray(cloudVal)));
     // ★修复"删除后回来"：云端旧数据无 fieldMeta 时，仅当本地也无时间戳且无数据（真正首次同步）才采用云端；
     // 本地有时间戳意味着本地做过有意修改（包括删空），不被无时间戳的旧云端数据反向覆盖
     const cloudIsNewer=cloudT?(!localT||cloudT>localT):(!localT&&!localHasData);
     if(cloudValid&&cloudIsNewer){
-      setter(cloudVal);
-      changed=true;
-      merges.push(field);
+      // ★修复：增加内容差异比较，相同内容只同步时间戳不覆盖不回推，避免乒乓循环
+      var localCur=getLocalVal(field);
+      var same=false;
+      try{same=JSON.stringify(cloudVal)===JSON.stringify(localCur)}catch(e){}
+      if(same){
+        if(cloudT){SYNC_META[field+"_t"]=cloudT;saveSyncMeta()}
+      }else{
+        setter(cloudVal);
+        changed=true;
+        merges.push(field);
+      }
+    }
+  }
+  // ★新增：取当前本地字段值，用于 mergeField 内容比较
+  function getLocalVal(field){
+    switch(field){
+      case "tasks":return TASKS;case "library":return LIBRARY;case "publish":return PUBLISH;
+      case "videolinks":return VIDEOLINKS;case "accounts":return ACCOUNTS;case "benchmarks":return BENCHMARKS;
+      case "persons":return PERSONS;case "orgTree":return ORG_TREE;case "hidden":return HIDDEN;
+      case "personColumns":return PERSON_COLUMNS;case "notifySettings":return NOTIFY_SETTINGS;
+      case "schedData":return SCHED_DATA;case "schedNotify":return SCHED_NOTIFY;
+      case "schedAnchor":return SCHED_ANCHOR;case "schedAnchorNotify":return SCHED_ANCHOR_NOTIFY;
+      case "schedService":return SCHED_SERVICE;case "schedServiceNotify":return SCHED_SERVICE_NOTIFY;
+      case "webhookProxy":return WEBHOOK_PROXY_URL;case "qbank":return QBANK;case "kbank":return KBANK;
+      default:return null;
     }
   }
   mergeField("tasks",data.tasks,true,v=>{TASKS=v},TASKS.length>0);
@@ -10305,7 +10350,7 @@ function mergeCloudPayload(data){
   mergeField("videolinks",data.videolinks,true,v=>{VIDEOLINKS=v},VIDEOLINKS.length>0);
   mergeField("accounts",data.accounts,true,v=>{ACCOUNTS=v},ACCOUNTS.length>0);
   mergeField("benchmarks",data.benchmarks,true,v=>{BENCHMARKS=v},BENCHMARKS.length>0);
-  mergeField("persons",data.persons,true,v=>{PERSONS=v},PERSONS.length>0);
+  mergeField("persons",data.persons,true,v=>{PERSONS=v;localStorage.setItem(K_PERSONS,JSON.stringify(PERSONS))},PERSONS.length>0); // ★修复：setter 补 localStorage 持久化
   mergeField("orgTree",data.orgTree,true,v=>{ORG_TREE=v},ORG_TREE.length>0);
   mergeField("qbank",data.qbank,true,v=>{QBANK=v;localStorage.setItem(K_QBANK,JSON.stringify(QBANK))},QBANK.length>0);
   mergeField("kbank",data.kbank,true,v=>{KBANK=v;localStorage.setItem(K_KBANK,JSON.stringify(KBANK))},KBANK.length>0);
@@ -10549,7 +10594,7 @@ async function pushCloudData(){
     console.error("sync push error:",err);
     // 连续失败3次以上不再自动重试，等用户手动同步
     if(sbFailCount<3){sbPendingSync=true}
-    else updateSyncBadge("off","⚠️ 请先建表");
+    else{updateSyncBadge("off","⚠️ 同步失败，请检查网络");toast("云同步连续失败，已暂停自动重试，可手动点击同步重试")} // ★修复：不再静默放弃
   }
   sbSyncing=false;
   if(sbPendingSync&&sbFailCount<3){sbPendingSync=false;setTimeout(pushCloudData,2000)}
