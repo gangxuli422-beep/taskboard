@@ -3364,6 +3364,7 @@ function psSelectView(view){
     if(filterBar)filterBar.style.display="none";
     if(boardEl){boardEl.style.display="";boardEl.classList.add("summary-mode");}
     renderSidebar();
+    if(!summaryGroupFilter){initSummaryGroupFilter()}
     renderSummary();
   }else if(view==="sched"){
     if(pubSec)pubSec.style.display="none";
@@ -3798,6 +3799,15 @@ function renderAll(){
 
 /* ============ SUMMARY (汇总大屏) ============ */
 let summaryGroupFilter=""; // 汇总大屏当前筛选的组名，""=全部团队
+// ★修复：进入汇总大屏时默认选第一个分组（去掉"全部团队"后自动定位到分组）
+function initSummaryGroupFilter(){
+  const groups=getOrgGroups();
+  if(groups.length>0){
+    summaryGroupFilter=groups[0];
+  }else{
+    summaryGroupFilter="";
+  }
+}
 function getOrgGroups(){
   const groups=[];
   (function walk(nodes){
@@ -3846,7 +3856,7 @@ function renderSummary(){
   const chipRow=document.createElement("div");
   chipRow.style.cssText="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px";
   const chipBtn=(label,val,active)=>'<button type="button" onclick="setSummaryGroup(\''+val.replace(/'/g,"\\'")+'\')" style="border:none;cursor:pointer;padding:7px 15px;border-radius:999px;font-size:12.5px;font-weight:700;font-family:inherit;transition:all .2s;background:'+(active?"linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;box-shadow:0 4px 12px rgba(99,102,241,.28)":"#fff;color:var(--ink-soft);border:1.5px solid #ece6dc")+'">'+esc(label)+'</button>';
-  chipRow.innerHTML='<span style="font-size:13px;font-weight:700;color:var(--ink-soft)">👥 按组汇总：</span>'+chipBtn("全部团队","",summaryGroupFilter==="")+groups.map(g=>chipBtn(g,g,summaryGroupFilter===g)).join("");
+  chipRow.innerHTML='<span style="font-size:13px;font-weight:700;color:var(--ink-soft)">👥 按组汇总：</span>'+groups.map(g=>chipBtn(g,g,summaryGroupFilter===g)).join("");
   board.appendChild(chipRow);
   // ============ ① 顶部统计卡片（加大字号） ============
   const scopeTasks=TASKS.filter(t=>inScope(t.personId));
