@@ -1628,6 +1628,7 @@
       <div class="form-item" id="fieldTime"><label>任务时间</label><input type="datetime-local" id="f_time"></div>
       <div class="form-item"><label>地点</label><input type="text" id="f_place" placeholder="泉州 · 惠安工地"></div>
       <div class="form-item"><label>负责人</label><input type="text" id="f_owner" placeholder="张三"></div>
+      <div class="form-item"><label>创建人</label><input type="text" id="f_createdBy" placeholder="谁创建/下发的任务（留空则自动填当前登录用户）"></div>
       <div class="form-item"><label>收到时间</label><input type="datetime-local" id="f_receive"></div>
       <div class="form-item"><label>完成时间</label><input type="datetime-local" id="f_done"></div>
 <div class="form-item"><label>放置位置</label><input type="text" id="f_location" placeholder="素材库 / 网盘 / 展架位"></div>
@@ -6279,6 +6280,8 @@ let badges="";
   if(!NO_TIME_COLS.includes(t.column)&&t.taskTime)rows+='<div class="task-row"><span class="lab">时间</span><span class="val time">'+esc(fmtDate(t.taskTime))+'</span></div>';
   if(t.place)rows+='<div class="task-row"><span class="lab">地点</span><span class="val place">'+esc(t.place)+'</span></div>';
   if(t.owner)rows+='<div class="task-row"><span class="lab">负责</span><span class="val owner">'+esc(t.owner)+'</span></div>';
+  // ★新增：看板卡片显示创建人（谁下发的任务）
+  if(t.createdBy)rows+='<div class="task-row"><span class="lab">来自</span><span class="val" style="color:#6366f1;font-weight:600">'+esc(t.createdBy)+'</span></div>';
   if(t.type)rows+='<div class="task-row"><span class="lab">类型</span><span class="val">'+esc(t.type)+'</span></div>';
   if(t.receiveTime)rows+='<div class="task-row"><span class="lab">收到</span><span class="val time">'+esc(fmtDateShort(t.receiveTime))+'</span></div>';
   if(t.doneTime&&t.completed)rows+='<div class="task-row"><span class="lab">完成</span><span class="val time">'+esc(fmtDateShort(t.doneTime))+'</span></div>';
@@ -6413,6 +6416,8 @@ function renderTodo(){
     badgeHtml+='<span class="badge col">'+colDef.emoji+" "+esc(colDef.name)+'</span>';
     if(t.priority){var pl=t.priority==="high"?"高":t.priority==="mid"?"中":"低";badgeHtml+='<span class="badge pri-'+t.priority+'">'+pl+'</span>'}
     if(t.owner)badgeHtml+='<span class="badge col">'+esc(t.owner)+'</span>';
+    // ★新增：待办卡片显示创建人（谁下发的任务），用不同颜色区分负责人
+    if(t.createdBy)badgeHtml+='<span class="badge" style="background:#eef0fe;color:#6366f1" title="由 '+esc(t.createdBy)+' 创建/下发">📬 '+esc(t.createdBy)+'</span>';
     // 重复规则标记
     if(t.repeat&&t.repeat.mode){
       var rptLabel={daily:"每天",weekly:"每周",monthly:"每月",weekdays:"工作日"}[t.repeat.mode]||t.repeat.mode;
@@ -6869,6 +6874,7 @@ async function checkTimeoutTasksOnly(s,list,today){
     content+="["+(idx+1)+"] "+(colDef.emoji||"📌")+" "+(t.title||"")+"\n";
     content+="    超时 "+item.days+" 天 | "+fmtDateShort(t.taskTime)+"\n";
     if(t.owner)content+="    负责人："+t.owner+"\n";
+    if(t.createdBy)content+="    创建人："+t.createdBy+"\n";
     content+="\n";
   });
   try{
@@ -6950,6 +6956,7 @@ async function checkDueTasks(s,list,today){
     content+="["+(idx+1)+"] "+(colDef.emoji||"📌")+" "+(t.title||"")+"\n";
     content+="    还有 "+(item.remainDays===0?"今天":item.remainDays+" 天")+" 到期 | "+fmtDateShort(t.taskTime)+"\n";
     if(t.owner)content+="    负责人："+t.owner+"\n";
+    if(t.createdBy)content+="    创建人："+t.createdBy+"\n";
     content+="\n";
   });
   try{
@@ -6977,6 +6984,9 @@ function openAddModal(colId){
   $("f_time").value="";
   $("f_place").value="";
   $("f_owner").value="";
+  // ★新增：创建人字段——默认填当前登录用户名（localStorage taskBoard_user），让接收人知道是谁下发的任务
+  var curUser=localStorage.getItem("taskBoard_user")||"";
+  $("f_createdBy").value=curUser;
   $("f_receive").value=nowInputVal();
   $("f_done").value="";
   $("f_location").value="";
@@ -7026,6 +7036,8 @@ function editTask(id){
   $("f_time").value=t.taskTime?t.taskTime.slice(0,16):"";
   $("f_place").value=t.place||"";
   $("f_owner").value=t.owner||"";
+  // ★新增：回填创建人
+  $("f_createdBy").value=t.createdBy||"";
   $("f_receive").value=t.receiveTime?t.receiveTime.slice(0,16):"";
   $("f_done").value=t.doneTime?t.doneTime.slice(0,16):"";
   $("f_location").value=t.location||"";
@@ -7068,6 +7080,8 @@ function saveTask(){
     taskTime:NO_TIME_COLS.includes(col)?"":$("f_time").value||"",
     place:$("f_place").value.trim(),
     owner:$("f_owner").value.trim(),
+    // ★新增：保存创建人（谁下发/创建了这个任务）
+    createdBy:$("f_createdBy").value.trim()||(localStorage.getItem("taskBoard_user")||""),
     receiveTime:$("f_receive").value||"",
     doneTime:$("f_done").value||"",
     location:$("f_location").value.trim(),
