@@ -4063,6 +4063,22 @@ function renderSummary(){
 /* ============ SCHEDULE VIEW (值日排班独立页面) ============ */
 function renderSchedView(){
   const board=$("board");
+  // ★修复：保存正在编辑的单元格状态，云同步触发重渲染后恢复，避免编辑被打断丢失输入
+  var schedEditing=null;
+  try{
+    var activeInp=document.querySelector('#schedBody input.sched-cell-input');
+    if(activeInp){
+      var tdEl=activeInp.closest('td');
+      var trEl=activeInp.closest('tr');
+      var tbodyEl=trEl?trEl.parentNode:null;
+      if(tdEl&&trEl&&tbodyEl){
+        var ri=[].indexOf.call(tbodyEl.children,trEl);
+        var ci=[].indexOf.call(trEl.children,tdEl);
+        schedEditing={ri:ri,ci:ci,val:activeInp.value||"",sel:activeInp.selectionStart};
+        activeInp.__suppressCommit=true; // ★防止重建时 blur 把半打的字提前提交到云端
+      }
+    }
+  }catch(e){}
   board.innerHTML="";
   const page=document.createElement("div");
   page.className="sched-view-page";
@@ -4124,9 +4140,20 @@ function renderSchedView(){
     '</div>';
   page.appendChild(notifyCard);
   board.appendChild(page);
+  // ★修复：页面挂载后再恢复正在编辑的单元格（值+光标+焦点），用户无感继续打字
+  // 必须在 page 挂到 document 后执行，否则 getElementById("schedBody") 拿不到
+  if(schedEditing){
+    try{
+      schedEditCell(schedEditing.ri,schedEditing.ci);
+      var inp2=document.querySelector('#schedBody input.sched-cell-input');
+      if(inp2){
+        inp2.value=schedEditing.val;
+        try{inp2.setSelectionRange(schedEditing.sel,schedEditing.sel)}catch(e2){}
+        inp2.focus();
+      }
+    }catch(e){}
+  }
 }
-
-/* ============ SCHEDULE TABLE (卫生值日排班表 HTML) ============ */
 // —— 自动轮换排班逻辑 ——
 // 岗位人数定义：扫地2人 / 拖地2人 / 男卫1人 / 女卫1人 / 新媒体4人(固定) / 电商3人(固定)
 var SCHED_STATIC_POSTS={};  // 固定岗位（人员不轮换）：新媒体直播间/电商直播间
@@ -4386,7 +4413,8 @@ function renderSchedTableHTML(){
   // 组切换 tabs
   SCHED_DATA.groups.forEach(function(grp,i){
     var isActive=i===SCHED_DATA.active;
-    html+='<button class="sched-tab'+(isActive?" active":"")+'" onclick="schedSelectGroup('+i+')">'+esc(grp.title||("第"+(i+1)+"组"))+'</button>';
+    // ★新增：双击标签直接改名（先切到该组再内联编辑，手机端可用底部的"✏️ 重命名当前组"按钮）
+    html+='<button class="sched-tab'+(isActive?" active":"")+'" onclick="schedSelectGroup('+i+')" ondblclick="schedRenameGroup()" title="'+esc(grp.title||("第"+(i+1)+"组"))+'（双击可改名）">'+esc(grp.title||("第"+(i+1)+"组"))+'</button>';
   });
   html+='<button class="sched-tab-add" onclick="schedGenerateNext()" title="自动生成下一周排班">＋</button>';
   html+='</div></div>';
@@ -4466,8 +4494,32 @@ function schedDelGroup(){
 function schedRenameGroup(){
   var g=SCHED_DATA.groups[SCHED_DATA.active];
   if(!g)return;
-  var name=prompt("请输入新名称：",g.title||"");
-  if(name&&name.trim()){g.title=name.trim();saveSchedData();renderSchedView();}
+  // ★修复：从 prompt() 改为内联编辑（手机端 prompt 常被拦截导致"改不了名"）；点击当前组标签直接变输入框
+  var tabs=document.querySelectorAll('.sched-tab');
+  var tab=tabs[SCHED_DATA.active];
+  if(!tab){
+    var name=prompt("请输入新名称：",g.title||"");
+    if(name&&name.trim()){g.title=name.trim();saveSchedData();renderSchedView();}
+    return;
+  }
+  tab.onclick=null; // 防止点击输入框冒泡触发切换组
+  tab.innerHTML='';
+  var inp=document.createElement('input');
+  inp.type='text';
+  inp.value=g.title||"";
+  inp.style.cssText='width:120px;border:2px solid var(--accent);border-radius:6px;padding:2px 8px;font-size:11.5px;font-weight:600;outline:none;font-family:inherit';
+  tab.appendChild(inp);
+  inp.focus();inp.select();
+  function done(){
+    var v=inp.value.trim();
+    if(v&&v!==g.title){g.title=v;saveSchedData();renderSchedView();}
+    else{renderSchedView();}
+  }
+  inp.addEventListener('blur',done);
+  inp.addEventListener('keydown',function(e){
+    if(e.key==='Enter')inp.blur();
+    if(e.key==='Escape'){inp.value=g.title||"";inp.blur();}
+  });
 }
 function schedAddRow(){
   var g=SCHED_DATA.groups[SCHED_DATA.active];
@@ -4517,13 +4569,19 @@ function schedEditCell(ri,ci){
   inp.focus();
   inp.select();
   function commit(){
+    // ★修复：renderSchedView 重建时的 blur 不应提交半打的字（编辑状态已被捕获，恢复后继续）
+    if(inp.__suppressCommit){inp.__suppressCommit=false;td.textContent=inp.value.trim();td.onclick=function(){schedEditCell(ri,ci)};return}
     var val=inp.value.trim();
-    g.rows[ri][ci]=val;
-    // 若编辑的是"负责人"列（第3列），同步更新该组成员名单
-    if(ci===2){
-      g.members=extractRotatableMembers(g);
+    // ★修复：commit 时重新获取组引用，防止云端同步已替换 SCHED_DATA 导致写入旧引用丢失
+    var cur=SCHED_DATA.groups[SCHED_DATA.active];
+    if(cur&&cur.rows&&cur.rows[ri]){
+      cur.rows[ri][ci]=val;
+      // 若编辑的是"负责人"列（第3列），同步更新该组成员名单
+      if(ci===2){
+        cur.members=extractRotatableMembers(cur);
+      }
+      saveSchedData();
     }
-    saveSchedData();
     td.textContent=val;
     td.onclick=function(){schedEditCell(ri,ci)};
   }
@@ -4537,8 +4595,32 @@ function schedEditHeader(ci){
   var g=SCHED_DATA.groups[SCHED_DATA.active];
   if(!g)return;
   var old=g.cols[ci]||"";
-  var name=prompt("请输入列名称：",old);
-  if(name&&name.trim()){g.cols[ci]=name.trim();saveSchedData();renderSchedView();}
+  // ★修复：从 prompt() 改为内联编辑表头（手机端 prompt 常被拦截），点击列名直接变输入框
+  var th=document.querySelector('#schedTable thead th:nth-child('+(ci+1)+')');
+  if(!th){
+    var name=prompt("请输入列名称：",old);
+    if(name&&name.trim()){g.cols[ci]=name.trim();saveSchedData();renderSchedView();}
+    return;
+  }
+  th.onclick=null; // 防止点击输入框冒泡重复触发表头编辑
+  th.innerHTML='';
+  th.title='';
+  var inp=document.createElement('input');
+  inp.type='text';
+  inp.value=old;
+  inp.style.cssText='width:100%;border:none;border-bottom:2px solid var(--accent);background:transparent;font-size:12px;font-weight:800;outline:none;color:inherit;font-family:inherit;padding:2px 4px;box-sizing:border-box';
+  th.appendChild(inp);
+  inp.focus();inp.select();
+  function done(){
+    var v=inp.value.trim();
+    if(v&&v!==old){g.cols[ci]=v;saveSchedData();}
+    renderSchedView();
+  }
+  inp.addEventListener('blur',done);
+  inp.addEventListener('keydown',function(e){
+    if(e.key==='Enter')inp.blur();
+    if(e.key==='Escape'){inp.value=old;inp.blur();}
+  });
 }
 
 /* ============ SCHEDULE PUSH (值日表企业微信推送) ============ */
